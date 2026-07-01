@@ -22,7 +22,7 @@ fn encode_wide(s: &str) -> Vec<u16> {
 fn main() {
     #[cfg(windows)]
     unsafe {
-        windows_sys::Win32::UI::WindowsAndMessaging::SetProcessDPIAware();
+        // SetProcessDPIAware(); // 고해상도(DPI) 환경에서 창이 너무 작게 나오는 현상을 방지하기 위해 OS 자동 스케일링으로 위임
         
         // 중복 실행 감지: 기존 실행 중인 키서 창이 있으면 WM_CLOSE를 전송하여 종료시키고 새 인스턴스는 종료 (Toggle 기능)
         let class_name = encode_wide("KeysorMainClass");
