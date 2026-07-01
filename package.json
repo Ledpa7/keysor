@@ -1,0 +1,8 @@
+{
+  "name": "keysor-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "npm install --prefix homepage && npm run build --prefix homepage && cp -r homepage/dist ./dist"
+  }
+}
