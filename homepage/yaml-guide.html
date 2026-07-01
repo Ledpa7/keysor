@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="ko" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Keysor YAML 설정 가이드 | 키서</title>
+  <meta name="description" content="키서(Keysor)의 단축키 및 동작 세부 제어를 위한 keysor.yaml 파일 상세 가이드 문서입니다.">
+  <link rel="stylesheet" href="/src/style.css">
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Outfit:wght@300;400;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+    .font-outfit {
+      font-family: 'Outfit', sans-serif;
+    }
+    .font-mono-code {
+      font-family: 'Fira Code', monospace;
+    }
+  </style>
+</head>
+<body class="bg-[#030712] text-slate-300 min-h-screen selection:bg-emerald-500/30 selection:text-emerald-400">
+  <!-- Glowing Background Gradients -->
+  <div class="fixed inset-0 overflow-hidden pointer-events-none z-0">
+    <div class="absolute -top-[30%] -left-[10%] w-[60%] h-[60%] rounded-full bg-emerald-500/5 blur-[120px]"></div>
+    <div class="absolute top-[40%] -right-[20%] w-[60%] h-[60%] rounded-full bg-cyan-500/5 blur-[120px]"></div>
+  </div>
+
+  <!-- Header / Nav -->
+  <header class="sticky top-0 z-50 border-b border-slate-900 bg-slate-950/80 backdrop-blur-md">
+    <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-3 group">
+        <div class="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold font-outfit shadow-lg shadow-emerald-500/10 transition-all group-hover:border-emerald-400">
+          K
+        </div>
+        <span class="text-lg font-bold text-white tracking-wider font-outfit group-hover:text-emerald-400 transition-colors">KEYSOR</span>
+      </a>
+      <div class="text-xs text-slate-500 font-mono select-none">
+        Docs / YAML Guide
+      </div>
+    </div>
+  </header>
+
+  <div class="max-w-7xl mx-auto px-6 py-24 relative z-10 flex flex-col lg:flex-row gap-12">
+    <!-- Sidebar Navigation -->
+    <aside class="lg:w-60 shrink-0">
+      <nav class="sticky top-28 space-y-1">
+        <div class="text-xs font-bold text-emerald-400 uppercase tracking-widest px-3 mb-4 font-mono">가이드 목차</div>
+        <a href="#location" class="block px-3 py-2.5 text-sm text-slate-400 hover:text-white hover:bg-slate-900/50 rounded-lg transition-all font-medium border-l border-transparent hover:border-emerald-500/40">1. 설정 파일 위치</a>
+        <a href="#settings" class="block px-3 py-2.5 text-sm text-slate-400 hover:text-white hover:bg-slate-900/50 rounded-lg transition-all font-medium border-l border-transparent hover:border-emerald-500/40">2. 주요 설정 항목</a>
+        <a href="#bindings" class="block px-3 py-2.5 text-sm text-slate-400 hover:text-white hover:bg-slate-900/50 rounded-lg transition-all font-medium border-l border-transparent hover:border-emerald-500/40">3. 키 매핑 커스텀</a>
+        <a href="#runapp" class="block px-3 py-2.5 text-sm text-slate-400 hover:text-white hover:bg-slate-900/50 rounded-lg transition-all font-medium border-l border-transparent hover:border-emerald-500/40">4. RunApp 런처 활용</a>
+        <a href="#template" class="block px-3 py-2.5 text-sm text-slate-400 hover:text-white hover:bg-slate-900/50 rounded-lg transition-all font-medium border-l border-transparent hover:border-emerald-500/40">5. 기본 YAML 템플릿</a>
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 lg:max-w-5xl">
+      <!-- Title Section -->
+      <section class="border-b border-slate-900 pb-12">
+        <span class="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-2 block font-mono">Keysor Configuration docs</span>
+        <h1 class="text-4xl font-extrabold text-white tracking-tight mb-4 font-outfit">keysor.yaml 설정 완벽 가이드</h1>
+        <p class="text-slate-400 leading-relaxed text-base">
+          키서(Keysor)는 YAML 형식의 설정 파일을 지원하여 작동 모드, 세부 속도 및 가속율, 기능별 커스텀 단축키 매핑을 자유롭게 구성할 수 있습니다. 본 문서는 각 설정 항목에 대해 누구나 알기 쉽게 나누어 설명합니다.
+        </p>
+      </section>
+
+      <!-- 1. 파일 위치 (Flex Stack 구성) -->
+      <section id="location" class="scroll-mt-28 flex flex-col gap-16" style="margin-top: 96px;">
+        <div class="space-y-4">
+          <h2 class="text-2xl font-bold text-white flex items-center gap-3 font-outfit">
+            <span class="text-emerald-400 font-mono">1.</span> 설정 파일 위치
+          </h2>
+          <p class="text-slate-400 text-sm leading-relaxed">
+            키서는 실행 시 아래 경로의 폴더를 검색하여 설정 파일을 로드합니다. 파일이 존재하지 않는 경우 자동으로 기본값을 포함한 템플릿을 생성합니다.
+          </p>
+        </div>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <!-- Left Column: Paths -->
+          <div class="p-6 rounded-2xl bg-slate-950/40 border border-slate-900/80 backdrop-blur-sm space-y-4">
+            <h3 class="text-white text-sm font-bold uppercase tracking-wider font-mono border-b border-slate-900 pb-2">기본 로드 경로</h3>
+            <div>
+              <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5 font-mono">Windows 탐색기 경로</div>
+              <div class="p-3 rounded bg-slate-900/50 border border-slate-800 text-emerald-400 font-mono text-xs select-all overflow-x-auto whitespace-nowrap">
+                C:\Users\&lt;사용자이름&gt;\.keysor\keysor.yaml
+              </div>
+            </div>
+            <div>
+              <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5 font-mono">단축 환경 변수 경로</div>
+              <div class="p-3 rounded bg-slate-900/50 border border-slate-800 text-emerald-400 font-mono text-xs select-all overflow-x-auto whitespace-nowrap">
+                %USERPROFILE%\.keysor\keysor.yaml
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column: Quick open tip -->
+          <div class="p-6 rounded-2xl bg-slate-950/40 border border-slate-900/80 backdrop-blur-sm flex flex-col justify-between">
+            <div class="space-y-3">
+              <h3 class="text-white text-sm font-bold uppercase tracking-wider font-mono border-b border-slate-900 pb-2">💡 초간단 실행 팁</h3>
+              <p class="text-xs text-slate-400 leading-relaxed mb-3">
+                바탕화면이나 탐색기에서 일일이 폴더를 찾아 들어갈 필요 없이 아래 단축키 조합으로 한 번에 진입이 가능합니다.
+              </p>
+              <div class="text-xs text-slate-300 space-y-2.5 pl-1">
+                <div>1. <kbd class="px-1.5 py-0.5 bg-slate-900 rounded border border-slate-800 text-emerald-400 font-mono text-[10px]">Win + R</kbd> 키를 눌러 실행 창 오픈</div>
+                <div>2. 실행 창에 <code class="px-1.5 py-0.5 bg-slate-900 rounded text-emerald-400 font-mono text-[10px]">%USERPROFILE%\.keysor</code> 입력 후 엔터</div>
+              </div>
+            </div>
+            <div class="mt-6 text-[10px] text-slate-500 pt-2 border-t border-slate-900/60">
+              * 파일이 없을 시 최초 실행할 때 자동으로 템플릿 파일이 생성됩니다.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. 주요 설정 항목 (Flex Stack 구성) -->
+      <section id="settings" class="scroll-mt-28 flex flex-col gap-16" style="margin-top: 128px;">
+        <div class="space-y-4">
+          <h2 class="text-2xl font-bold text-white flex items-center gap-3 font-outfit">
+            <span class="text-emerald-400 font-mono">2.</span> 주요 설정 항목 설명
+          </h2>
+          <p class="text-slate-400 text-sm leading-relaxed">
+            설정 파일 최상단의 <code class="text-emerald-400 font-mono">settings:</code> 필드에서 마우스의 작동 방식을 변경하는 핵심 매개변수들입니다.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <!-- modifier_mode -->
+          <div class="p-6 rounded-2xl bg-slate-950/40 border border-slate-900/60 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-3 border-b border-slate-900/80 pb-2">
+                <span class="font-bold text-white font-mono text-sm">modifier_mode</span>
+                <span class="text-[9px] bg-slate-900 text-slate-400 px-1.5 py-0.5 rounded font-mono">String</span>
+              </div>
+              <p class="text-xs text-slate-400 leading-relaxed mb-4">
+                마우스 모드 활성화 방식을 결정합니다.
+              </p>
+              <div class="text-[11px] text-slate-500 space-y-2">
+                <div>• <code class="text-slate-300 font-mono font-semibold">"Toggle"</code> : 키를 탭하여 ON/OFF (기본값)</div>
+                <div>• <code class="text-slate-300 font-mono font-semibold">"Hold"</code> : 키를 누르고 있는 동안에만 작동</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- speed settings -->
+          <div class="p-6 rounded-2xl bg-slate-950/40 border border-slate-900/60 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-3 border-b border-slate-900/80 pb-2">
+                <span class="font-bold text-white font-mono text-sm">base / max_speed</span>
+                <span class="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono">Pro 전용</span>
+              </div>
+              <p class="text-xs text-slate-400 leading-relaxed mb-4">
+                마우스 속도 범위를 지정합니다.
+              </p>
+              <div class="text-[11px] text-slate-500 space-y-2">
+                <div>• <code class="text-slate-300 font-mono font-semibold">base_speed</code> : 시작 속도 (기본 1.5px)</div>
+                <div>• <code class="text-slate-300 font-mono font-semibold">max_speed</code> : 최대 가속 한계 (기본 30.0px)</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- acceleration -->
+          <div class="p-6 rounded-2xl bg-slate-950/40 border border-slate-900/60 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-3 border-b border-slate-900/80 pb-2">
+                <span class="font-bold text-white font-mono text-sm">acceleration</span>
+                <span class="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono">Pro 전용</span>
+              </div>
+              <p class="text-xs text-slate-400 leading-relaxed mb-4">
+                이동 키를 유지할 때 가속도가 붙는 가속 승수입니다.
+              </p>
+              <div class="text-[11px] text-slate-500">
+                • 기본값은 <code class="text-slate-300 font-mono font-semibold">1.5</code>이며, 값이 클수록 마우스 이동 조작 시 빠르게 가속되어 최종 최고 속도에 도달합니다.
+              </div>
+            </div>
+          </div>
+
+          <!-- magnetic_mode -->
+          <div class="p-6 rounded-2xl bg-slate-950/40 border border-slate-900/60 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-3 border-b border-slate-900/80 pb-2">
+                <span class="font-bold text-white font-mono text-sm">magnetic_mode</span>
+                <span class="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono">Pro 전용</span>
+              </div>
+              <p class="text-xs text-slate-400 leading-relaxed mb-4">
+                키서 전용 로컬 HUD 패널 내부의 버튼에 마우스가 접근할 때 자동으로 중심부에 달라붙는 기능입니다. (기본값: false)
+              </p>
+            </div>
+          </div>
+
+          <!-- global_magnetic_mode -->
+          <div class="p-6 rounded-2xl bg-slate-950/40 border border-slate-900/60 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-3 border-b border-slate-900/80 pb-2">
+                <span class="font-bold text-white font-mono text-sm">global_magnetic_mode</span>
+                <span class="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono">Pro 전용</span>
+              </div>
+              <p class="text-xs text-slate-400 leading-relaxed mb-4">
+                전체 OS 윈도우 창 및 웹 브라우저 내 조작 버튼, 체크박스, 하이퍼링크 등 모든 UI 요소 25px 진입 시 자동으로 커서가 스냅 흡착됩니다. (기본값: false)
+              </p>
+            </div>
+          </div>
+
+          <!-- unified_space_click -->
+          <div class="p-6 rounded-2xl bg-slate-950/40 border border-slate-900/60 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-3 border-b border-slate-900/80 pb-2">
+                <span class="font-bold text-white font-mono text-sm">unified_space_click</span>
+                <span class="text-[9px] bg-slate-900 text-slate-400 px-1.5 py-0.5 rounded font-mono">Boolean</span>
+              </div>
+              <p class="text-xs text-slate-400 leading-relaxed mb-4">
+                스페이스바 클릭 융합 모드 활성화 여부입니다. (기본값: true)
+              </p>
+              <div class="text-[11px] text-slate-500">
+                • 활성화 시 스페이스바 단독 입력은 좌클릭, 연타 시 더블클릭, 길게 누르면 드래그 시작/종료 토글로 작동합니다.
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. 키 매핑 및 단축키 지정 (Flex Stack 구성) -->
+      <section id="bindings" class="scroll-mt-28 flex flex-col gap-16" style="margin-top: 128px;">
+        <div class="space-y-4">
+          <h2 class="text-2xl font-bold text-white flex items-center gap-3 font-outfit">
+            <span class="text-emerald-400 font-mono">3.</span> 키 매핑 및 단축키 지정
+          </h2>
+          <p class="text-slate-400 text-sm leading-relaxed">
+            <code class="text-emerald-400 font-mono">bindings:</code> 필드에서는 트리거 키와 액션을 매핑하여 사용자가 선호하는 조작 배치를 완성할 수 있습니다.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <!-- Left Column: Available Actions (Table Style) -->
+          <div class="p-6 rounded-2xl bg-slate-950/40 border border-slate-900/80 backdrop-blur-sm space-y-4">
+            <h3 class="text-white text-xs font-bold uppercase tracking-wider font-mono border-b border-slate-900 pb-2">할당 가능한 마우스 액션</h3>
+            <div class="space-y-2.5 text-xs font-mono">
+              <div class="flex justify-between border-b border-slate-900/60 py-2">
+                <span class="text-emerald-400">MouseMoveUp / Down / Left / Right</span>
+                <span class="text-slate-500">마우스 커서 상/하/좌/우 이동</span>
+              </div>
+              <div class="flex justify-between border-b border-slate-900/60 py-2">
+                <span class="text-emerald-400">MouseScrollUp / Down / Left / Right</span>
+                <span class="text-slate-500">마우스 휠 스크롤 상/하/좌/우</span>
+              </div>
+              <div class="flex justify-between border-b border-slate-900/60 py-2">
+                <span class="text-emerald-400">MouseLeftClick / MouseRightClick</span>
+                <span class="text-slate-500">마우스 좌클릭 및 우클릭</span>
+              </div>
+              <div class="flex justify-between border-b border-slate-900/60 py-2">
+                <span class="text-emerald-400">MouseDoubleClick</span>
+                <span class="text-slate-500">마우스 더블 클릭 실행</span>
+              </div>
+              <div class="flex justify-between py-2">
+                <span class="text-emerald-400">RunApp:&lt;Path&gt;</span>
+                <span class="text-slate-500">지정한 외부 프로그램 실행</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column: Trigger Keys -->
+          <div class="p-6 rounded-2xl bg-slate-950/40 border border-slate-900/80 backdrop-blur-sm flex flex-col justify-between">
+            <div class="space-y-4">
+              <h3 class="text-white text-xs font-bold uppercase tracking-wider font-mono border-b border-slate-900 pb-2">사용 가능한 키보드 명칭</h3>
+              <p class="text-xs text-slate-400 leading-relaxed mb-2">
+                트리거 키(<code class="text-emerald-400 font-mono">trigger</code>)로 맵핑 가능한 키보드 단독 키와 특수 명칭들입니다.
+              </p>
+              
+              <div class="space-y-4">
+                <div class="text-[11px] text-slate-500 font-mono"><strong class="text-slate-300">일반 키:</strong> "A" ~ "Z" 알파벳 문자열</div>
+                <div class="text-[11px] text-slate-500 font-mono"><strong class="text-slate-300">방향 키:</strong> "Up", "Down", "Left", "Right"</div>
+                <div class="text-[11px] text-slate-500 font-mono"><strong class="text-slate-300">기타 특수 키:</strong> "Space", "RightShift", "LeftShift", "Tab", "Escape", "F1" ~ "F12"</div>
+              </div>
+            </div>
+
+            <div class="p-3.5 rounded-xl bg-[#10b981]/5 border border-emerald-500/10 text-[11px] text-slate-400 leading-relaxed mt-6">
+              📌 <strong class="text-slate-300">참고:</strong> 키서 1.1 버전부터는 방향키, 숫자 키, F-키들이 설정 파일에 맵핑되지 않은 경우, 차단되지 않고 OS로 투과(Bypass)되어 정상적인 문서 작업이나 단축키 활용이 가능합니다.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. RunApp 런처 활용 (Flex Stack 구성) -->
+      <section id="runapp" class="scroll-mt-28 flex flex-col gap-16" style="margin-top: 128px;">
+        <div class="space-y-4">
+          <h2 class="text-2xl font-bold text-white flex items-center gap-3 font-outfit">
+            <span class="text-emerald-400 font-mono">4.</span> RunApp 런처 활용 가이드
+          </h2>
+          <p class="text-slate-400 text-sm leading-relaxed">
+            단축키 등록 한 번으로 컴퓨터의 앱이나 자주 접속하는 웹 페이지를 즉시 구동하는 백그라운드 런처 기능입니다.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <!-- Left: Precautions & Rules -->
+          <div class="p-6 rounded-2xl bg-slate-950/40 border border-slate-900/80 backdrop-blur-sm space-y-4">
+            <h3 class="text-white text-xs font-bold uppercase tracking-wider font-mono border-b border-slate-900 pb-2">작성법 및 규칙</h3>
+            <ul class="text-xs text-slate-400 space-y-3.5 list-disc list-inside">
+              <li>경로 및 파일명에 공백(띄어쓰기)이 있는 경우에는 반드시 경로를 큰따옴표(<code class="text-emerald-400">"</code>)로 감싸고, 전체를 작은따옴표(<code class="text-emerald-400">'</code>)로 정의해야 합니다.</li>
+              <li>환경 변수로 등록된 프로그램(예: Chrome, Notepad, Calc 등)은 절대 경로 없이 실행파일명만 적어도 작동합니다.</li>
+              <li>웹 브라우저를 띄울 때는 실행 프로그램 뒤에 띄어쓰기로 주소를 인자로 넘겨줄 수 있습니다.</li>
+            </ul>
+          </div>
+
+          <!-- Right: Code examples -->
+          <div class="p-6 rounded-2xl bg-slate-950/40 border border-slate-900/80 backdrop-blur-sm space-y-4">
+            <h3 class="text-white text-xs font-bold uppercase tracking-wider font-mono border-b border-slate-900 pb-2">YAML 작성 예시</h3>
+            
+            <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800 font-mono text-xs text-slate-300 space-y-4">
+              <div>
+                <div class="text-[10px] text-slate-500 mb-1"># 일반 메모장 실행</div>
+                - <span class="text-emerald-400">trigger</span>: "G"<br>
+                &nbsp;&nbsp;<span class="text-emerald-400">action</span>: 'RunApp: "notepad.exe"'
+              </div>
+              <div class="border-t border-slate-800/85 pt-3.5">
+                <div class="text-[10px] text-slate-500 mb-1"># 크롬 브라우저로 깃허브 바로가기</div>
+                - <span class="text-emerald-400">trigger</span>: "F1"<br>
+                &nbsp;&nbsp;<span class="text-emerald-400">action</span>: 'RunApp: "chrome.exe https://github.com"'
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. 기본 YAML 템플릿 (Flex Stack 구성) -->
+      <section id="template" class="scroll-mt-28 flex flex-col gap-16" style="margin-top: 128px;">
+        <div class="space-y-4">
+          <div class="flex items-center justify-between border-b border-slate-900 pb-3">
+            <h2 class="text-2xl font-bold text-white flex items-center gap-3 font-outfit">
+              <span class="text-emerald-400 font-mono">5.</span> 기본 YAML 템플릿
+            </h2>
+            <button id="copy-btn" class="px-3.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold hover:bg-emerald-500 hover:text-slate-950 transition-all flex items-center gap-2 cursor-pointer font-mono shadow-lg shadow-emerald-500/5">
+              Copy Config
+            </button>
+          </div>
+          <p class="text-slate-400 text-sm leading-relaxed">
+            설정 파일을 초기화하거나 직접 파일을 복구하고 싶을 때 아래의 표준 기본 설정 템플릿 코드를 복사해서 붙여넣으십시오.
+          </p>
+        </div>
+
+        <div class="relative rounded-2xl border border-slate-900 bg-slate-950 overflow-hidden shadow-2xl">
+          <div class="flex items-center justify-between px-6 py-3.5 bg-slate-950 border-b border-slate-900">
+            <span class="text-xs text-slate-500 font-mono font-medium">keysor.yaml</span>
+            <div class="flex gap-1.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-slate-800"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-slate-800"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-slate-800"></span>
+            </div>
+          </div>
+          <pre class="p-6 overflow-x-auto text-xs text-slate-300 font-mono-code leading-relaxed select-all"><code id="code-block"># keysor.yaml - 키서 단축키 및 동작 설정 파일
+settings:
+  modifier_mode: "Toggle"        # "Hold" (Caps Lock을 누르는 동안에만 조작) 또는 "Toggle" (켜고 끄기)
+  modifier_key: "CapsLock"     # 활성화 단축키 (기본값 CapsLock)
+
+  base_speed: 1.5              # 마우스 시작 속도 (픽셀 단위)
+  max_speed: 30.0              # 마우스 최대 속도 (픽셀 단위)
+  acceleration: 1.5            # 누르고 있을 때의 가속도 비율
+
+  # 스페이스바 단일 키 클릭 연동 특수 기능 활성화
+  unified_space_click: true
+  double_click_threshold_ms: 100
+  drag_hold_threshold_ms: 250
+  refresh_rate_hz: 100         # 이동 주기 주사율 (기본값 100Hz, 원격 접속 시 60으로 낮춤)
+  magnetic_mode: false         # 자석 모드 활성화 여부 (HUD 버튼에 마우스가 다가가면 흡착)
+  global_magnetic_mode: false  # 전역 UI 자석 모드 활성화 여부
+  lang_en: true                # 기본 언어 영어 설정 (true: 영어, false: 한국어)
+  license_key: ""              # 프로 라이선스 키 (구입 후 발급받은 키 입력)
+
+bindings:
+  # ==========================================
+  # 1. 이동 바인딩 (하이브리어드 지원)
+  # ==========================================
+  # 왼손 단독 제어 (WASD)
+  - trigger: "W"
+    action: "MouseMoveUp"
+  - trigger: "S"
+    action: "MouseMoveDown"
+  - trigger: "A"
+    action: "MouseMoveLeft"
+  - trigger: "D"
+    action: "MouseMoveRight"
+
+  # ==========================================
+  # 2. 보조 클릭 및 스크롤 바인딩
+  # ==========================================
+  - trigger: "R"
+    action: "MouseScrollUp"
+  - trigger: "F"
+    action: "MouseScrollDown"
+  - trigger: "Q"
+    action: "MouseScrollLeft"
+  - trigger: "E"
+    action: "MouseScrollRight"
+  - trigger: "G"
+    action: "MouseRightClick"
+  - trigger: "RightShift"
+    action: "MouseRightClick"</code></pre>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Footer -->
+  <footer class="mt-24 border-t border-slate-900 bg-slate-950/50 py-12 text-center text-xs text-slate-600 font-mono">
+    <div>© 2026 Keysor. All rights reserved.</div>
+  </footer>
+
+  <script>
+    // Copy Code Block functionality
+    const copyBtn = document.getElementById('copy-btn');
+    const codeBlock = document.getElementById('code-block');
+
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(codeBlock.innerText).then(() => {
+        const originalText = copyBtn.innerText;
+        copyBtn.innerText = 'Copied!';
+        copyBtn.classList.remove('text-emerald-400', 'border-emerald-500/30', 'bg-emerald-500/10');
+        copyBtn.classList.add('text-slate-950', 'bg-emerald-400', 'border-emerald-400');
+        
+        setTimeout(() => {
+          copyBtn.innerText = originalText;
+          copyBtn.classList.remove('text-slate-950', 'bg-emerald-400', 'border-emerald-400');
+          copyBtn.classList.add('text-emerald-400', 'border-emerald-500/30', 'bg-emerald-500/10');
+        }, 2000);
+      });
+    });
+  </script>
+</body>
+</html>

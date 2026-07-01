@@ -1,0 +1,29 @@
+[package]
+name = "keysor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+ureq = { version = "2.9", features = ["native-tls", "json"] }
+serde_json = "1.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52.0", features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_LibraryLoader",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Console",
+    "Win32_Graphics_GdiPlus"
+] }
+uiautomation = "0.25.0"
+
+[build-dependencies]
+embed-resource = "2.5.0"
+
+[[bin]]
+name = "test_uia"
+path = "scratch/test_uia.rs"

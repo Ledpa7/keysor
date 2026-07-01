@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title data-i18n="title">Keysor — Keyboard-only Mouse Cursor Controller</title>
+  <meta name="description" content="400KB ultra-lightweight, ultra-stable native mouse emulator powered by Rust and Win32 low-level hooks. Supports magnet snapping & custom hotkeys.">
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <!-- Main Stylesheet -->
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body class="grid-bg min-h-screen relative antialiased selection:bg-emerald-500/30 selection:text-emerald-300">
+
+  <!-- Background Decorative Orbs -->
+  <div class="absolute top-0 left-1/4 w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none -z-10"></div>
+  <div class="absolute top-[40%] right-1/4 w-[400px] h-[400px] bg-cyan-500/5 rounded-full blur-[100px] pointer-events-none -z-10"></div>
+
+  <!-- Navbar -->
+  <header class="border-b border-slate-900 bg-slate-950/50 backdrop-blur-md sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <!-- Logo -->
+        <img src="/logo.svg" alt="Keysor Logo" class="w-8 h-8 rounded-lg shadow-lg shadow-emerald-500/20 object-cover border border-emerald-500/30">
+        <span class="font-extrabold text-xl tracking-tight bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">Keysor</span>
+      </div>
+      <nav class="flex items-center gap-6">
+        <a href="#download" data-i18n="nav_download" class="text-sm font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 px-4 py-2 rounded-lg transition-all shadow-md shadow-emerald-400/10">Download</a>
+        
+        <!-- Language Switcher -->
+        <div class="flex items-center gap-1 bg-slate-900/60 border border-slate-800 rounded-lg p-0.5 text-[11px] font-semibold font-mono">
+          <button data-lang="en" class="lang-btn px-2 py-1 rounded transition-all text-slate-400 border border-transparent cursor-pointer">EN</button>
+          <button data-lang="ko" class="lang-btn px-2 py-1 rounded transition-all text-slate-400 border border-transparent cursor-pointer">KO</button>
+          <button data-lang="zh" class="lang-btn px-2 py-1 rounded transition-all text-slate-400 border border-transparent cursor-pointer">ZH</button>
+        </div>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="max-w-5xl mx-auto px-6 pt-24 pb-16 text-center">
+    <div data-i18n="hero_badge" class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-emerald-500/20 bg-emerald-500/5 text-emerald-400 text-xs font-semibold tracking-wide uppercase mb-6">
+      ⚡ Rust & Win32 Native Hooking Subsystem
+    </div>
+    <h1 data-i18n="hero_title" class="text-5xl md:text-7xl font-extrabold tracking-tight text-white mb-6 leading-tight max-w-4xl mx-auto">
+      Give Wings to Cursor<br>
+      <span class="bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">on Your Keyboard.</span>
+    </h1>
+    <p data-i18n="hero_desc" class="text-sm text-slate-400 max-w-2xl mx-auto mb-10 leading-relaxed font-normal">
+      Keysor, a portmanteau of Keyboard and Cursor, is a PC utility that replaces your mouse with keyboard controls. Experience 0ms latency and a convenient interface.
+    </p>
+
+    <!-- Download/CLI actions -->
+    <div class="flex flex-wrap items-center justify-center gap-4 mb-8 pt-6">
+      <a href="https://github.com/Ledpa7/keysor/releases/latest/download/keysor.exe" class="w-[260px] px-6 py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/20 hover:scale-[1.02] flex items-center justify-center gap-3">
+        <svg class="w-5 h-5 fill-slate-950" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M0 3.449L9.75 2.1v9.45H0V3.449zM0 12.45h9.75v9.45L0 20.551v-8.1zM11.25 1.899L24 0v11.55H11.25V1.899zM11.25 12.45H24v11.55l-12.75-1.9v-9.65z"/>
+        </svg>
+        <span data-i18n="hero_btn_download_win_text">Download for Windows</span>
+      </a>
+      <div class="relative flex items-center justify-center">
+        <a href="javascript:void(0)" class="w-[260px] px-6 py-4 bg-slate-900/50 border border-slate-800 text-slate-500 font-bold rounded-xl transition-all flex items-center justify-center gap-3 cursor-not-allowed select-none opacity-85">
+          <svg class="w-5 h-5 fill-slate-500" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 4.17c.66-.81 1.11-1.93.99-3.06-1 .04-2.21.67-2.93 1.49-.62.69-1.16 1.84-1.01 2.96 1.12.09 2.27-.57 2.95-1.39z"/>
+          </svg>
+          <span data-i18n="hero_btn_download_mac_text">Download for macOS</span>
+        </a>
+        <span data-i18n="mac_coming_soon" class="absolute pointer-events-none text-xs font-extrabold text-slate-950 bg-emerald-400 px-3 py-1 rounded-full shadow-lg shadow-emerald-500/20 tracking-wider whitespace-nowrap opacity-80">개발 예정</span>
+      </div>
+    </div>
+  </section>
+
+
+
+  <!-- Features Grid -->
+  <section id="features" class="max-w-7xl mx-auto px-6 py-24 scroll-mt-16">
+    <div class="text-center mb-16">
+      <h2 data-i18n="features_title" class="text-3xl font-extrabold text-white mb-4">Unrivaled Precision Control</h2>
+      <p data-i18n="features_desc" class="text-slate-400 max-w-xl mx-auto">
+        Powered by pure Rust without a garbage collector and Windows native low-level APIs, breaking through system resource limits.
+      </p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+      <!-- Feature 1 -->
+      <div class="p-8 rounded-2xl bg-slate-950/40 border border-slate-900 backdrop-blur-sm neon-border transition-all flex flex-col justify-between">
+        <div>
+          <div class="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-2xl text-emerald-400 mb-6 font-mono">
+            0ms
+          </div>
+          <h3 data-i18n="feature1_title" class="text-xl font-bold text-white mb-3">Low-level OS Input Hooking</h3>
+          <p data-i18n="feature1_desc" class="text-slate-400 text-sm leading-relaxed">
+            Intercepts low-level keyboard hooks (`WH_KEYBOARD_LL`) directly, achieving 0ms latency response. Deep integration with OS thread prevents freezing.
+          </p>
+        </div>
+      </div>
+
+      <!-- Feature 2 -->
+      <div class="p-8 rounded-2xl bg-slate-950/40 border border-slate-900 backdrop-blur-sm neon-border transition-all flex flex-col justify-between">
+        <div>
+          <div class="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-2xl text-emerald-400 mb-6">
+            🧲
+          </div>
+          <h3 data-i18n="feature2_title" class="text-xl font-bold text-white mb-3">Magnet Snapping (Hysteresis)</h3>
+          <p data-i18n="feature2_desc" class="text-slate-400 text-sm leading-relaxed">
+            Automatically snaps to the center of nearby interactive UI elements (buttons, icons, tabs, etc.) within 25px. Incorporates a 15px hysteresis algorithm for smooth detaching.
+          </p>
+        </div>
+      </div>
+
+      <!-- Feature 3 -->
+      <div class="p-8 rounded-2xl bg-slate-950/40 border border-slate-900 backdrop-blur-sm neon-border transition-all flex flex-col justify-between">
+        <div>
+          <div class="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-2xl text-emerald-400 mb-6">
+            📐
+          </div>
+          <h3 data-i18n="feature3_title" class="text-xl font-bold text-white mb-3">Diagonal Speed Correction</h3>
+          <p data-i18n="feature3_desc" class="text-slate-400 text-sm leading-relaxed">
+            Corrects diagonal movement speeds using a 1/sqrt(2) (≈ 0.707) trigonometric scaling factor, ensuring the cursor moves at a constant speed in all directions.
+          </p>
+        </div>
+      </div>
+
+      <!-- Feature 4 -->
+      <div class="p-8 rounded-2xl bg-slate-950/40 border border-slate-900 backdrop-blur-sm neon-border transition-all flex flex-col justify-between">
+        <div>
+          <div class="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-2xl text-emerald-400 mb-6">
+            🔍
+          </div>
+          <h3 data-i18n="feature4_title" class="text-xl font-bold text-white mb-3">Sub-pixel Accumulation</h3>
+          <p data-i18n="feature4_desc" class="text-slate-400 text-sm leading-relaxed">
+            Accumulates fractional distance remainders across frames, ensuring ultra-smooth micro-movements and seamless linear acceleration.
+          </p>
+        </div>
+      </div>
+
+      <!-- Feature 5 -->
+      <div class="p-8 rounded-2xl bg-slate-950/40 border border-slate-900 backdrop-blur-sm neon-border transition-all flex flex-col justify-between">
+        <div>
+          <div class="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-2xl text-emerald-400 mb-6">
+            ⚡
+          </div>
+          <h3 data-i18n="feature5_title" class="text-xl font-bold text-white mb-3">High-Precision 100Hz Thread</h3>
+          <p data-i18n="feature5_desc" class="text-slate-400 text-sm leading-relaxed">
+            Runs calculations on a dedicated 100Hz background thread mapped with DPI scales, maintaining a lag-free control loop even under heavy system loads.
+          </p>
+        </div>
+      </div>
+
+      <!-- Feature 6 -->
+      <div class="p-8 rounded-2xl bg-slate-950/40 border border-slate-900 backdrop-blur-sm neon-border transition-all flex flex-col justify-between">
+        <div>
+          <div class="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-2xl text-emerald-400 mb-6">
+            🔋
+          </div>
+          <h3 data-i18n="feature6_title" class="text-xl font-bold text-white mb-3">Ultra-lightweight Resource Usage</h3>
+          <p data-i18n="feature6_desc" class="text-slate-400 text-sm leading-relaxed">
+            Runs as a single portable binary of just 400KB and consumes less than 2MB of memory. Limits CPU and GPU usage to under 0.1% for maximum efficiency.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Hotkeys Guide Section -->
+  <section id="hotkeys" class="max-w-5xl mx-auto px-6 py-24 scroll-mt-16">
+    <div class="text-center mb-16">
+      <h2 data-i18n="hotkeys_title" class="text-3xl font-extrabold text-white mb-4">Keysor Hotkeys & Control Layers</h2>
+      <p data-i18n="hotkeys_desc" class="text-slate-400 max-w-xl mx-auto">
+        Manage three ergonomic control directions and helper shortcut sequences simultaneously with a single Caps Lock modifier key.
+      </p>
+    </div>
+
+    <!-- Live HUD Preview Section -->
+    <div class="w-full overflow-x-auto flex flex-col items-center mb-16 no-scrollbar pb-2">
+      <!-- HUD Desktop Window Replica -->
+      <div id="hud-window" class="relative w-[808px] h-[452px] min-w-[808px] bg-[#121210] rounded-2xl border-2 border-[#ADFF2F] shadow-[0_0_30px_rgba(173,255,47,0.15)] text-slate-300 font-sans select-none overflow-hidden transition-all duration-300">
+        
+        <!-- Title Bar -->
+        <div class="absolute left-[30px] top-[26px] right-[30px] h-[34px] flex items-center justify-between">
+          <!-- Neon Title -->
+          <div class="relative font-bold text-lg select-none">
+            <!-- Dark shadow layer -->
+            <span id="hud-title-shadow" class="absolute left-0 top-[1px] text-[#004D20] tracking-wide font-extrabold" data-i18n="hud_title">Keysor, Keyboard & Cursor as One!</span>
+            <!-- Neon text layer -->
+            <span id="hud-title-text" class="relative text-[#ADFF2F] tracking-wide font-extrabold" data-i18n="hud_title">Keysor, Keyboard & Cursor as One!</span>
+          </div>
+
+          <!-- Window Controls (Top Right Bar) -->
+          <div class="flex items-center gap-2">
+            <!-- Language Toggle Button -->
+            <button id="hud-btn-lang" class="h-6 w-12 bg-[#202424] border border-[#3C4040] text-[#888888] text-[11px] font-mono font-bold rounded cursor-pointer hover:bg-[#3C4040] hover:border-[#ADFF2F] hover:text-[#ADFF2F] transition-all">KO</button>
+          </div>
+        </div>
+
+        <!-- Keyboard Region (Row 1-5) -->
+        <div class="absolute inset-0 pointer-events-none">
+          <!-- All keycaps positioned absolutely -->
+          
+          <!-- Row 1 -->
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 30px; top: 80px; width: 48px;">~</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 84px; top: 80px; width: 48px;">1</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 138px; top: 80px; width: 48px;">2</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 192px; top: 80px; width: 48px;">3</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 246px; top: 80px; width: 48px;">4</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 300px; top: 80px; width: 48px;">5</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 354px; top: 80px; width: 48px;">6</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 408px; top: 80px; width: 48px;">7</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 462px; top: 80px; width: 48px;">8</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 516px; top: 80px; width: 48px;">9</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 570px; top: 80px; width: 48px;">0</div>
+
+          <!-- Row 2 -->
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 30px; top: 134px; width: 72px;">Tab</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#00FFFF] shadow-[0_0_8px_rgba(0,255,255,0.15)] flex flex-col justify-start items-center pt-1.5 font-mono select-none" style="left: 108px; top: 134px; width: 48px;">
+            <span class="text-[#00FFFF] font-bold text-[13px] leading-none">Q</span>
+            <span class="text-white text-[9px] mt-0.5 font-sans font-medium" data-i18n="hud_key_q_desc">Scl ◀</span>
+          </div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#00E040] shadow-[0_0_8px_rgba(0,224,64,0.15)] flex flex-col justify-start items-center pt-1.5 font-mono select-none" style="left: 162px; top: 134px; width: 48px;">
+            <span class="text-[#00E040] font-bold text-[13px] leading-none">W</span>
+            <span class="text-white text-[9px] mt-0.5 font-sans font-medium" data-i18n="hud_key_w_desc">Up ▲</span>
+          </div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#00FFFF] shadow-[0_0_8px_rgba(0,255,255,0.15)] flex flex-col justify-start items-center pt-1.5 font-mono select-none" style="left: 216px; top: 134px; width: 48px;">
+            <span class="text-[#00FFFF] font-bold text-[13px] leading-none">E</span>
+            <span class="text-white text-[9px] mt-0.5 font-sans font-medium" data-i18n="hud_key_e_desc">Scl ▶</span>
+          </div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#00FFFF] shadow-[0_0_8px_rgba(0,255,255,0.15)] flex flex-col justify-start items-center pt-1.5 font-mono select-none" style="left: 270px; top: 134px; width: 48px;">
+            <span class="text-[#00FFFF] font-bold text-[13px] leading-none">R</span>
+            <span class="text-white text-[9px] mt-0.5 font-sans font-medium" data-i18n="hud_key_r_desc">Whl ▲</span>
+          </div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 324px; top: 134px; width: 48px;">T</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 378px; top: 134px; width: 48px;">Y</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 432px; top: 134px; width: 48px;">U</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 486px; top: 134px; width: 48px;">I</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 540px; top: 134px; width: 48px;">O</div>
+
+          <!-- Row 3 -->
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#FF0033] shadow-[0_0_8px_rgba(255,0,51,0.15)] flex flex-col justify-start items-center pt-1.5 font-mono select-none" style="left: 30px; top: 188px; width: 84px;">
+            <span class="text-[#FF0033] font-bold text-[13px] leading-none">Caps</span>
+            <span class="text-white text-[9px] mt-0.5 font-sans font-medium" data-i18n="hud_key_caps_desc">ON/OFF</span>
+          </div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#00E040] shadow-[0_0_8px_rgba(0,224,64,0.15)] flex flex-col justify-start items-center pt-1.5 font-mono select-none" style="left: 120px; top: 188px; width: 48px;">
+            <span class="text-[#00E040] font-bold text-[13px] leading-none">A</span>
+            <span class="text-white text-[9px] mt-0.5 font-sans font-medium" data-i18n="hud_key_a_desc">Left ◀</span>
+          </div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#00E040] shadow-[0_0_8px_rgba(0,224,64,0.15)] flex flex-col justify-start items-center pt-1.5 font-mono select-none" style="left: 174px; top: 188px; width: 48px;">
+            <span class="text-[#00E040] font-bold text-[13px] leading-none">S</span>
+            <span class="text-white text-[9px] mt-0.5 font-sans font-medium" data-i18n="hud_key_s_desc">Down ▼</span>
+          </div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#00E040] shadow-[0_0_8px_rgba(0,224,64,0.15)] flex flex-col justify-start items-center pt-1.5 font-mono select-none" style="left: 228px; top: 188px; width: 48px;">
+            <span class="text-[#00E040] font-bold text-[13px] leading-none">D</span>
+            <span class="text-white text-[9px] mt-0.5 font-sans font-medium" data-i18n="hud_key_d_desc">Right ▶</span>
+          </div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#00FFFF] shadow-[0_0_8px_rgba(0,255,255,0.15)] flex flex-col justify-start items-center pt-1.5 font-mono select-none" style="left: 282px; top: 188px; width: 48px;">
+            <span class="text-[#00FFFF] font-bold text-[13px] leading-none">F</span>
+            <span class="text-white text-[9px] mt-0.5 font-sans font-medium" data-i18n="hud_key_f_desc">Whl ▼</span>
+          </div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#FFFF00] shadow-[0_0_8px_rgba(255,255,0,0.15)] flex flex-col justify-start items-center pt-1.5 font-mono select-none" style="left: 336px; top: 188px; width: 48px;">
+            <span class="text-[#FFFF00] font-bold text-[13px] leading-none">G</span>
+            <span class="text-white text-[9px] mt-0.5 font-sans font-medium" data-i18n="hud_key_g_desc">R-Clk</span>
+          </div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 390px; top: 188px; width: 48px;">H</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-white shadow-[0_0_8px_rgba(255,255,255,0.15)] flex flex-col justify-start items-center pt-1.5 font-mono select-none" style="left: 444px; top: 188px; width: 48px;">
+            <span class="text-white font-bold text-[13px] leading-none">J</span>
+            <span class="text-white text-[8px] mt-1 font-sans font-medium" data-i18n="hud_key_j_desc">◀Tab</span>
+          </div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-white shadow-[0_0_8px_rgba(255,255,255,0.15)] flex flex-col justify-start items-center pt-1.5 font-mono select-none" style="left: 498px; top: 188px; width: 48px;">
+            <span class="text-white font-bold text-[13px] leading-none">K</span>
+            <span class="text-white text-[8px] mt-1 font-sans font-medium" data-i18n="hud_key_k_desc">Tab ▶</span>
+          </div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 552px; top: 188px; width: 48px;">L</div>
+
+          <!-- Row 4 -->
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-white shadow-[0_0_8px_rgba(255,255,255,0.15)] flex flex-col justify-start items-center pt-1 font-mono select-none" style="left: 30px; top: 242px; width: 102px;">
+            <span class="text-white font-bold text-[13px] leading-none">Shift</span>
+            <span class="text-white text-[8px] leading-tight text-center mt-0.5 font-sans font-medium whitespace-pre-line" data-i18n="hud_key_shift_desc">+Q/E Back/Fwd&#10;+J/K Desktops</span>
+          </div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 138px; top: 242px; width: 48px;">Z</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 192px; top: 242px; width: 48px;">X</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 246px; top: 242px; width: 48px;">C</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 300px; top: 242px; width: 48px;">V</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 354px; top: 242px; width: 48px;">B</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 408px; top: 242px; width: 48px;">N</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 462px; top: 242px; width: 48px;">M</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 516px; top: 242px; width: 48px;">&lt;</div>
+
+          <!-- Row 5 -->
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 30px; top: 296px; width: 48px;">Ctrl</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 84px; top: 296px; width: 48px;">Win</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 138px; top: 296px; width: 48px;">Alt</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#FF4500] shadow-[0_0_8px_rgba(255,69,0,0.15)] flex flex-col justify-start items-center pt-1.5 font-mono select-none" style="left: 192px; top: 296px; width: 264px;">
+            <span class="text-[#FF4500] font-bold text-[13px] leading-none">Spacebar</span>
+            <span class="text-white text-[9px] mt-0.5 font-sans font-medium" data-i18n="hud_key_space_desc">Left Click (1:L / 2:Db / Hold:Drag)</span>
+          </div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 462px; top: 296px; width: 48px;">Alt</div>
+          <div class="absolute h-12 bg-[#202424] rounded-lg border border-[#3C4040] flex items-center justify-center font-mono text-[#888888] font-bold text-[14px] select-none" style="left: 516px; top: 296px; width: 48px;">Win</div>
+        </div>
+
+        <!-- SPEED SENS Panel -->
+        <div id="hud-sens-panel" class="absolute left-[638px] top-[80px] w-[140px] h-[264px] bg-[#161818] rounded-xl border-2 border-[#ADFF2F] shadow-[0_0_15px_rgba(173,255,47,0.05)] transition-all duration-300">
+          <!-- Title -->
+          <div class="absolute left-0 top-[10px] w-full text-center">
+            <span class="absolute left-0 right-0 top-[1px] text-[#004D20] text-xs font-bold font-mono tracking-wider" data-i18n="hud_sens_title">SPEED SENS</span>
+            <span class="relative text-[#ADFF2F] text-xs font-bold font-mono tracking-wider" data-i18n="hud_sens_title">SPEED SENS</span>
+          </div>
+          
+          <!-- Display Value -->
+          <div id="hud-sens-value" class="absolute left-0 top-[36px] w-full text-center text-white text-3xl font-bold font-mono tracking-wider">
+            1.0
+          </div>
+
+          <!-- Sens Details (when showDetail = true) -->
+          <div id="hud-sens-details" class="absolute left-[15px] top-[34px] w-[110px] text-[10px] font-mono text-white leading-relaxed hidden">
+            <div>Base : <span id="hud-val-base">1.0</span></div>
+            <div>Max  : <span id="hud-val-max">30.0</span></div>
+            <div>Accel: <span id="hud-val-accel">1.5</span></div>
+          </div>
+
+          <!-- [-] and [+] Controls -->
+          <button id="hud-sens-dec" class="absolute left-[20px] top-[90px] w-10 h-8 bg-[#202424] border border-[#3C4040] text-white text-lg font-bold rounded flex items-center justify-center cursor-pointer transition-all pb-1 hover:border-[#ADFF2F] hover:text-[#ADFF2F]">-</button>
+          <button id="hud-sens-inc" class="absolute left-[80px] top-[90px] w-10 h-8 bg-[#202424] border border-[#3C4040] text-white text-lg font-bold rounded flex items-center justify-center cursor-pointer transition-all pb-1 hover:border-[#ADFF2F] hover:text-[#ADFF2F]">+</button>
+
+          <!-- PIXEL Toggle -->
+          <button id="hud-btn-pixel" class="absolute left-[20px] top-[130px] w-[100px] h-8 bg-[#202424] border border-[#3C4040] text-slate-300 text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:border-[#ADFF2F]" data-i18n="hud_pixel_off">PIXEL: OFF</button>
+          
+          <!-- MAGNET Toggle -->
+          <button id="hud-btn-magnet" class="absolute left-[20px] top-[170px] w-[100px] h-8 bg-[#ADFF2F] border border-[#3C4040] text-slate-900 text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:brightness-110" data-i18n="hud_magnet_on">MAGNET: ON</button>
+          
+          <!-- VIEW DETAIL Toggle -->
+          <button id="hud-btn-detail" class="absolute left-[20px] top-[210px] w-[100px] h-8 bg-[#202424] border border-[#3C4040] text-[#888888] text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:border-[#ADFF2F]" data-i18n="hud_view_detail">VIEW DETAIL</button>
+
+          <!-- Pro Lock Overlay -->
+          <div id="hud-lock-overlay" class="absolute inset-0 bg-[#0d0e0e]/95 rounded-xl flex flex-col items-center justify-center transition-all duration-300 opacity-0 pointer-events-none border border-[#3C4040]">
+            <span class="text-2xl mb-2">🔒</span>
+            <span class="text-[10px] font-bold text-[#888888] font-mono tracking-widest" data-i18n="hud_pro_only">PRO ONLY</span>
+          </div>
+        </div>
+
+        <!-- Warnings / Footers -->
+        <div class="absolute left-[30px] top-[366px] right-[30px] text-[11px] text-[#888888] space-y-1 font-sans">
+          <div data-i18n="hud_info1">※ All alphabet typing is blocked during mouse mode (except Ctrl/Alt/Win shortcuts).</div>
+          <div data-i18n="hud_info2">• Press Caps Lock again to return to normal keyboard mode.</div>
+          <div data-i18n="hud_info_close">• Automatically minimizes when mouse mode is active.</div>
+        </div>
+
+        <!-- Pro Lock Alert Modal -->
+        <div id="hud-alert-modal" class="absolute inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-20 opacity-0 pointer-events-none transition-all duration-300">
+          <div class="w-[380px] bg-[#121210] border-2 border-red-500 rounded-xl p-6 shadow-2xl text-center">
+            <div class="text-red-500 text-3xl mb-2">🔒</div>
+            <h4 class="text-white font-extrabold text-base mb-2" data-i18n="hud_locked_title">Pro Feature Locked</h4>
+            <p class="text-slate-400 text-xs mb-6 leading-relaxed" data-i18n="hud_locked_msg">This feature is only available in Keysor Pro. Would you like to purchase a Pro license?</p>
+            <div class="flex items-center justify-center gap-4">
+              <a href="https://merlinmultillm.lemonsqueezy.com/checkout/buy/d2e207ea-12fc-4fe7-83e3-1d44db528c82?discount=0" class="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold rounded-lg transition-all" data-i18n="pro_btn">Purchase Pro Lifetime</a>
+              <button id="hud-alert-close" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-lg cursor-pointer transition-all" data-i18n="hud_locked_close">Close</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="border border-slate-800 rounded-2xl bg-slate-950/40 backdrop-blur-sm overflow-hidden shadow-xl">
+      <table class="w-full text-left border-collapse">
+        <thead>
+          <tr class="border-b border-slate-800 bg-slate-900/50">
+            <th data-i18n="th_action" class="p-4 text-sm font-semibold text-slate-300">Operation Type</th>
+            <th data-i18n="th_key" class="p-4 text-sm font-semibold text-slate-300">Default Keybinding</th>
+            <th data-i18n="th_desc" class="p-4 text-sm font-semibold text-slate-300">Detailed Description</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-900 text-sm">
+          <tr>
+            <td data-i18n="td_toggle_title" class="p-4 font-bold text-white">Mode Toggle (ON/OFF)</td>
+            <td class="p-4"><kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-emerald-400">Caps Lock (Hold)</kbd></td>
+            <td data-i18n="td_toggle_desc" class="p-4 text-slate-400">Press and hold to activate Keysor mode (mouse emulation), which automatically minimizes the window. A single tap acts as a normal Caps Lock toggle.</td>
+          </tr>
+          <tr>
+            <td data-i18n="td_move_title" class="p-4 font-bold text-white">Move Cursor</td>
+            <td class="p-4"><kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">W / A / S / D</kbd> or <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Arrow keys</kbd></td>
+            <td data-i18n="td_move_desc" class="p-4 text-slate-400">Supports vertical and horizontal movement, with smooth acceleration (Lerp) based on key press duration.</td>
+          </tr>
+          <tr>
+            <td data-i18n="td_click_title" class="p-4 font-bold text-white">Click & Drag</td>
+            <td class="p-4"><kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Spacebar</kbd> / <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">G</kbd> / <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Right-Shift</kbd></td>
+            <td data-i18n="td_click_desc" class="p-4 text-slate-400">Tap Spacebar once to left-click, double-tap to double-click, and hold to toggle drag mode. G or Right-Shift acts as right-click.</td>
+          </tr>
+          <tr>
+            <td data-i18n="td_scroll_title" class="p-4 font-bold text-white">Scroll Screen</td>
+            <td class="p-4"><kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">R</kbd> (Up) / <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">F</kbd> (Down) / <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Q / E</kbd> (Horizontal Wheel)</td>
+            <td data-i18n="td_scroll_desc" class="p-4 text-slate-400">Emulates mouse scroll wheels smoothly via keyboard, eliminating fatigue during navigation and web browsing.</td>
+          </tr>
+          <tr>
+            <td data-i18n="td_nav_title" class="p-4 font-bold text-white">Web Browser Navigation</td>
+            <td class="p-4"><kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Shift + Q</kbd> (Back) / <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Shift + E</kbd> (Forward)</td>
+            <td data-i18n="td_nav_desc" class="p-4 text-slate-400">Sends native Windows back/forward message codes directly to avoid key sequence conflicts, ensuring 100% reliability.</td>
+          </tr>
+          <tr>
+            <td data-i18n="td_vdesk_title" class="p-4 font-bold text-white">Virtual Desktop Navigation</td>
+            <td class="p-4"><kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Shift + J</kbd> (Left) / <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Shift + K</kbd> (Right)</td>
+            <td data-i18n="td_vdesk_desc" class="p-4 text-slate-400">Instantly switches virtual desktops left/right by sending Windows Ctrl+Win+Left/Right Arrow key codes.</td>
+          </tr>
+          <tr>
+            <td data-i18n="td_bypass_title" class="p-4 font-bold text-white">Enter / Backspace Bypass</td>
+            <td class="p-4"><kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Enter</kbd> / <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Backspace</kbd></td>
+            <td data-i18n="td_bypass_desc" class="p-4 text-slate-400">Enter and Backspace keys bypass the emulator during active mouse mode, allowing normal typing buffers.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Pricing & Download Section -->
+  <section id="download" class="max-w-5xl mx-auto px-6 py-24 scroll-mt-16 text-center">
+    <h2 data-i18n="pricing_title" class="text-3xl font-extrabold text-white mb-4">Maximize Productivity with Keysor Pro</h2>
+    <p data-i18n="pricing_desc" class="text-slate-400 max-w-xl mx-auto mb-16 text-sm">
+      Use all Pro features without limits for 14 days. After expiration, it automatically downgrades to the basic mouse emulator (Free) for lifetime free use.
+    </p>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto text-left">
+      <!-- Free Edition Card -->
+      <div class="p-8 rounded-3xl border border-slate-900 bg-slate-950/40 backdrop-blur-sm flex flex-col justify-between relative overflow-hidden">
+        <div>
+          <span data-i18n="free_edition" class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block font-mono">FREE EDITION</span>
+          <h3 data-i18n="free_title" class="text-2xl font-bold text-white mb-1">Basic Free Version</h3>
+          <p data-i18n="free_desc" class="text-xs text-slate-500 mb-6">Essential features for mouse hardware failures or basic input replacements</p>
+          
+          <div class="flex items-baseline gap-1 mb-8">
+            <span data-i18n="free_price" class="text-4xl font-extrabold text-white">$0</span>
+            <span data-i18n="free_price_sub" class="text-slate-500 text-xs">/ Lifetime Free</span>
+          </div>
+
+          <ul class="space-y-4 mb-8 text-sm text-slate-400">
+            <li class="flex items-center gap-2">
+              <span class="text-emerald-400 font-bold">✓</span> <span data-i18n="free_li1">QWEASDRFG & Spacebar basic operation</span>
+            </li>
+            <li class="flex items-center gap-2">
+              <span class="text-emerald-400 font-bold">✓</span> <span data-i18n="free_li2">Fixed default mouse movement speed</span>
+            </li>
+            <li class="flex items-center gap-2">
+              <span class="text-emerald-400 font-bold">✓</span> <span data-i18n="free_li3">Default wheel scroll & right click</span>
+            </li>
+            <li class="flex items-center gap-2">
+              <span class="text-slate-600 font-bold">✗</span> <span data-i18n="free_li4">Magnet Snapping mode blocked (Global/Local)</span>
+            </li>
+            <li class="flex items-center gap-2">
+              <span class="text-slate-600 font-bold">✗</span> <span data-i18n="free_li5">Sensitivity adjustments & custom acceleration curve blocked</span>
+            </li>
+            <li class="flex items-center gap-2">
+              <span class="text-slate-600 font-bold">✗</span> <span data-i18n="free_li6">RunApp external app launcher blocked</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="flex flex-col gap-3 pt-3">
+          <a href="https://github.com/Ledpa7/keysor/releases/latest/download/keysor.exe" data-i18n="free_btn_win" class="w-full py-3.5 border border-slate-800 bg-slate-900/40 hover:bg-slate-900/80 text-slate-300 font-semibold rounded-xl transition-all text-center flex items-center justify-center gap-2">
+            <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path d="M0 3.449L9.75 2.1v9.45H0V3.449zM0 12.45h9.75v9.45L0 20.551v-8.1zM11.25 1.899L24 0v11.55H11.25V1.899zM11.25 12.45H24v11.55l-12.75-1.9v-9.65z"/>
+            </svg>
+            Download for Windows (.exe)
+          </a>
+          <div class="relative w-full flex items-center justify-center">
+            <a href="javascript:void(0)" data-i18n="free_btn_mac" class="w-full py-3.5 border border-slate-800 bg-slate-900/30 text-slate-500 font-semibold rounded-xl transition-all text-center flex items-center justify-center gap-2 cursor-not-allowed select-none opacity-85">
+              <svg class="w-4 h-4 fill-slate-550" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 4.17c.66-.81 1.11-1.93.99-3.06-1 .04-2.21.67-2.93 1.49-.62.69-1.16 1.84-1.01 2.96 1.12.09 2.27-.57 2.95-1.39z"/>
+              </svg>
+              Download for macOS (.zip)
+            </a>
+            <span data-i18n="mac_coming_soon" class="absolute pointer-events-none text-[10px] font-extrabold text-slate-950 bg-emerald-400 px-2.5 py-1 rounded-full shadow-lg shadow-emerald-500/20 tracking-wider whitespace-nowrap font-sans opacity-80">개발 예정</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pro Edition Card (Lemon Squeezy integration) -->
+      <div class="p-8 rounded-3xl border border-emerald-500/20 bg-slate-950 relative overflow-hidden flex flex-col justify-between shadow-2xl shadow-emerald-500/5">
+        <div class="absolute top-0 right-0 bg-emerald-500 text-slate-950 font-bold text-[10px] uppercase px-4 py-1 rounded-bl-lg font-mono">
+          50% EVENT
+        </div>
+        <div>
+          <span data-i18n="pro_edition" class="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-2 block font-mono">PRO EDITION</span>
+          <h3 data-i18n="pro_title" class="text-2xl font-bold text-white mb-1">Pro Productivity Edition</h3>
+          <p data-i18n="pro_desc" class="text-xs text-slate-500 mb-6">Snapping operations beyond a normal mouse & a powerful automation environment</p>
+
+          <div class="flex items-baseline gap-2 mb-8">
+            <span data-i18n="pro_price_original" class="text-slate-500 text-sm line-through">$7.99</span>
+            <span data-i18n="pro_price" class="text-4xl font-extrabold text-emerald-400">$3.99</span>
+            <span data-i18n="pro_price_sub" class="text-slate-500 text-xs">/ Lifetime License</span>
+          </div>
+
+          <ul class="space-y-4 mb-8 text-sm text-slate-300">
+            <li class="flex items-center gap-2">
+              <span class="text-emerald-400 font-bold">✓</span> <span data-i18n="pro_li1">Enable <strong>all global/local magnet snapping modes</strong></span>
+            </li>
+            <li class="flex items-center gap-2">
+              <span class="text-emerald-400 font-bold">✓</span> <span data-i18n="pro_li2"><strong>Fine sensitivity control</strong> & custom acceleration curves</span>
+            </li>
+            <li class="flex items-center gap-2">
+              <span class="text-emerald-400 font-bold">✓</span> <span data-i18n="pro_li3">Full access to <strong>RunApp shortcut launcher</strong></span>
+            </li>
+            <li class="flex items-center gap-2">
+              <span class="text-emerald-400 font-bold">✓</span> <span data-i18n="pro_li4"><strong>YAML hotkey customization</strong></span>
+            </li>
+            <li class="flex items-center gap-2">
+              <span class="text-emerald-400 font-bold">✓</span> <span data-i18n="pro_li5">14-day free trial included</span>
+            </li>
+          </ul>
+        </div>
+
+        <a href="https://merlinmultillm.lemonsqueezy.com/checkout/buy/d2e207ea-12fc-4fe7-83e3-1d44db528c82?discount=0" data-i18n="pro_btn" class="lemonsqueezy-button w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/20 text-center">
+          Purchase Pro Lifetime
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="border-t border-slate-950 py-12">
+    <div class="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-6">
+      <span data-i18n="footer_copyright" class="text-sm text-slate-600">© 2026 Keysor. All rights reserved.</span>
+      <div class="flex gap-6">
+        <a href="https://github.com/ledpadev/keysor/blob/main/LICENSE" class="text-xs text-slate-600 hover:text-slate-400">License</a>
+        <a href="https://github.com/ledpadev/keysor" class="text-xs text-slate-600 hover:text-slate-400">Documentation</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Lemon Squeezy Embed Script -->
+  <script src="https://lmsqueezy.com/assets/embed.js" defer></script>
+  <!-- Main JavaScript -->
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
+

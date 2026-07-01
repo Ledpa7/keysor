@@ -1,0 +1,10 @@
+/target/
+*.log
+*.err
+*.rej
+*.patch
+*.txt
+
+# homepage
+homepage/node_modules/
+homepage/dist/

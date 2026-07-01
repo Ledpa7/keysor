@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@theme {
+  --color-emerald-50: #f0fff9;
+  --color-emerald-100: #d6ffe9;
+  --color-emerald-200: #afffd5;
+  --color-emerald-300: #7affbc;
+  --color-emerald-400: #4dffa8;
+  --color-emerald-500: #2fffad;
+  --color-emerald-600: #00e68d;
+  --color-emerald-700: #00b86e;
+  --color-emerald-800: #008a52;
+  --color-emerald-900: #005c37;
+  --color-emerald-950: #00331e;
+}
+
+@layer base {
+  html, body {
+    background-color: #030712;
+    color: #f3f4f6;
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    overflow-x: hidden;
+    cursor: url('/cursor.svg') 16 16, auto;
+  }
+}
+
+/* Custom Grid Background */
+.grid-bg {
+  background-image: 
+    linear-gradient(to right, rgba(47, 255, 173, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(47, 255, 173, 0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Glow Effects */
+.neon-glow {
+  box-shadow: 0 0 20px rgba(47, 255, 173, 0.2);
+}
+
+.neon-border {
+  border: 1px solid rgba(47, 255, 173, 0.2);
+}
+
+.neon-border:hover {
+  border-color: rgba(47, 255, 173, 0.6);
+  box-shadow: 0 0 15px rgba(47, 255, 173, 0.15);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #030712;
+}
+::-webkit-scrollbar-thumb {
+  background: #1f2937;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(47, 255, 173, 0.5);
+}

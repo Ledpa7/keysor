@@ -1,0 +1,49 @@
+# keysor.yaml - 키서 단축키 및 동작 설정 파일
+# Pro 평생 라이선스 결제 및 획득: https://keysor.dev/#download
+# 결제 완료 후 이메일로 발급된 라이선스 키를 아래 LicenseKey 필드에 입력하여 저장해 주세요.
+LicenseKey: ""
+
+settings:
+  modifier_mode: "Toggle"        # "Hold" (Caps Lock을 누르는 동안에만 조작) 또는 "Toggle" (켜고 끄기)
+  modifier_key: "CapsLock"     # 활성화 단축키 (기본값 CapsLock)
+
+  base_speed: 1.5              # 마우스 시작 속도 (픽셀 단위)
+  max_speed: 30.0              # 마우스 최대 속도 (픽셀 단위)
+  acceleration: 1.5            # 누르고 있을 때의 가속도 비율
+
+  # 스페이스바 단일 키 클릭 연동 특수 기능 활성화
+  unified_space_click: true
+  double_click_threshold_ms: 100
+  drag_hold_threshold_ms: 250
+  refresh_rate_hz: 100         # 이동 주기 주사율 (기본값 100Hz, 원격 접속 시 60으로 낮추면 부드러워짐)
+
+bindings:
+  # ==========================================
+  # 1. 이동 바인딩 (하이브리드 지원)
+  # ==========================================
+  # 왼손 단독 제어 (WASD)
+  - trigger: "W"
+    action: "MouseMoveUp"
+  - trigger: "S"
+    action: "MouseMoveDown"
+  - trigger: "A"
+    action: "MouseMoveLeft"
+  - trigger: "D"
+    action: "MouseMoveRight"
+
+
+  # ==========================================
+  # 2. 보조 클릭 및 스크롤 바인딩
+  # ==========================================
+  - trigger: "R"
+    action: "MouseScrollUp"
+  - trigger: "F"
+    action: "MouseScrollDown"
+  - trigger: "Q"
+    action: "MouseScrollLeft"
+  - trigger: "E"
+    action: "MouseScrollRight"
+  - trigger: "G"
+    action: "MouseRightClick"
+  - trigger: "RightShift"
+    action: "MouseRightClick"
