@@ -462,13 +462,13 @@ document.addEventListener('DOMContentLoaded', () => {
   function updateHudUI() {
     // 1. Update Pro State styling
     if (hudState.isPro) {
-      hudWindow.style.borderColor = '#ADFF2F';
-      hudWindow.style.boxShadow = '0 0 30px rgba(173, 255, 47, 0.15)';
+      hudWindow.style.borderColor = '#2FFFAD';
+      hudWindow.style.boxShadow = '0 0 30px rgba(47, 255, 173, 0.15)';
       
       // Pro Active button styling
       if (hudBtnPro) {
         hudBtnPro.setAttribute('data-i18n', 'hud_pro_active');
-        hudBtnPro.className = 'h-6 px-3 bg-[#181818] border border-[#222222] text-[#ADFF2F] text-[11px] font-mono font-bold rounded cursor-pointer transition-all hover:brightness-125';
+        hudBtnPro.className = 'h-6 px-3 bg-[#181818] border border-[#222222] text-[#2FFFAD] text-[11px] font-mono font-bold rounded cursor-pointer transition-all hover:brightness-125';
       }
       
       // Update Title Text (Keysor, Keyboard & Cursor as One!)
@@ -479,7 +479,7 @@ document.addEventListener('DOMContentLoaded', () => {
       hudLockOverlay.classList.add('opacity-0', 'pointer-events-none');
       
       // Sensitivity panel border
-      document.getElementById('hud-sens-panel').style.borderColor = '#ADFF2F';
+      document.getElementById('hud-sens-panel').style.borderColor = '#2FFFAD';
     } else {
       hudWindow.style.borderColor = '#3C4040';
       hudWindow.style.boxShadow = 'none';
@@ -487,7 +487,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Buy Pro button styling
       if (hudBtnPro) {
         hudBtnPro.setAttribute('data-i18n', 'hud_buy_pro');
-        hudBtnPro.className = 'h-6 px-3 bg-[#202424] border border-[#3C4040] text-[#888888] text-[11px] font-mono font-bold rounded cursor-pointer transition-all hover:bg-[#3C4040] hover:border-[#ADFF2F] hover:text-[#ADFF2F]';
+        hudBtnPro.className = 'h-6 px-3 bg-[#202424] border border-[#3C4040] text-[#888888] text-[11px] font-mono font-bold rounded cursor-pointer transition-all hover:bg-[#3C4040] hover:border-[#2FFFAD] hover:text-[#2FFFAD]';
       }
       
       // Update Title Text (Keysor Free...)
@@ -529,18 +529,18 @@ document.addEventListener('DOMContentLoaded', () => {
     // 3. Toggles
     if (hudState.pixelMode) {
       hudBtnPixel.setAttribute('data-i18n', 'hud_pixel_on');
-      hudBtnPixel.className = 'absolute left-[20px] top-[130px] w-[100px] h-8 bg-[#ADFF2F] border border-[#3C4040] text-slate-900 text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:brightness-110';
+      hudBtnPixel.className = 'absolute left-[20px] top-[130px] w-[100px] h-8 bg-[#2FFFAD] border border-[#3C4040] text-slate-900 text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:brightness-110';
     } else {
       hudBtnPixel.setAttribute('data-i18n', 'hud_pixel_off');
-      hudBtnPixel.className = 'absolute left-[20px] top-[130px] w-[100px] h-8 bg-[#202424] border border-[#3C4040] text-slate-300 text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:border-[#ADFF2F]';
+      hudBtnPixel.className = 'absolute left-[20px] top-[130px] w-[100px] h-8 bg-[#202424] border border-[#3C4040] text-slate-300 text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:border-[#2FFFAD]';
     }
 
     if (hudState.magnetMode) {
       hudBtnMagnet.setAttribute('data-i18n', 'hud_magnet_on');
-      hudBtnMagnet.className = 'absolute left-[20px] top-[170px] w-[100px] h-8 bg-[#ADFF2F] border border-[#3C4040] text-slate-900 text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:brightness-110';
+      hudBtnMagnet.className = 'absolute left-[20px] top-[170px] w-[100px] h-8 bg-[#2FFFAD] border border-[#3C4040] text-slate-900 text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:brightness-110';
     } else {
       hudBtnMagnet.setAttribute('data-i18n', 'hud_magnet_off');
-      hudBtnMagnet.className = 'absolute left-[20px] top-[170px] w-[100px] h-8 bg-[#202424] border border-[#3C4040] text-slate-300 text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:border-[#ADFF2F]';
+      hudBtnMagnet.className = 'absolute left-[20px] top-[170px] w-[100px] h-8 bg-[#202424] border border-[#3C4040] text-slate-300 text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:border-[#2FFFAD]';
     }
 
     // Translate toggles

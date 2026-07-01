@@ -182,22 +182,22 @@
     <!-- Live HUD Preview Section -->
     <div class="w-full overflow-x-auto flex flex-col items-center mb-16 no-scrollbar pb-2">
       <!-- HUD Desktop Window Replica -->
-      <div id="hud-window" class="relative w-[808px] h-[452px] min-w-[808px] bg-[#121210] rounded-2xl border-2 border-[#ADFF2F] shadow-[0_0_30px_rgba(173,255,47,0.15)] text-slate-300 font-sans select-none overflow-hidden transition-all duration-300">
+      <div id="hud-window" class="relative w-[808px] h-[452px] min-w-[808px] bg-[#121210] rounded-2xl border-2 border-[#2FFFAD] shadow-[0_0_30px_rgba(47,255,173,0.15)] text-slate-300 font-sans select-none overflow-hidden transition-all duration-300">
         
         <!-- Title Bar -->
         <div class="absolute left-[30px] top-[26px] right-[30px] h-[34px] flex items-center justify-between">
           <!-- Neon Title -->
           <div class="relative font-bold text-lg select-none">
             <!-- Dark shadow layer -->
-            <span id="hud-title-shadow" class="absolute left-0 top-[1px] text-[#004D20] tracking-wide font-extrabold" data-i18n="hud_title">Keysor, Keyboard & Cursor as One!</span>
+            <span id="hud-title-shadow" class="absolute left-0 top-[1px] text-[#005C37] tracking-wide font-extrabold" data-i18n="hud_title">Keysor, Keyboard & Cursor as One!</span>
             <!-- Neon text layer -->
-            <span id="hud-title-text" class="relative text-[#ADFF2F] tracking-wide font-extrabold" data-i18n="hud_title">Keysor, Keyboard & Cursor as One!</span>
+            <span id="hud-title-text" class="relative text-[#2FFFAD] tracking-wide font-extrabold" data-i18n="hud_title">Keysor, Keyboard & Cursor as One!</span>
           </div>
 
           <!-- Window Controls (Top Right Bar) -->
           <div class="flex items-center gap-2">
             <!-- Language Toggle Button -->
-            <button id="hud-btn-lang" class="h-6 w-12 bg-[#202424] border border-[#3C4040] text-[#888888] text-[11px] font-mono font-bold rounded cursor-pointer hover:bg-[#3C4040] hover:border-[#ADFF2F] hover:text-[#ADFF2F] transition-all">KO</button>
+            <button id="hud-btn-lang" class="h-6 w-12 bg-[#202424] border border-[#3C4040] text-[#888888] text-[11px] font-mono font-bold rounded cursor-pointer hover:bg-[#3C4040] hover:border-[#2FFFAD] hover:text-[#2FFFAD] transition-all">KO</button>
           </div>
         </div>
 
@@ -305,11 +305,11 @@
         </div>
 
         <!-- SPEED SENS Panel -->
-        <div id="hud-sens-panel" class="absolute left-[638px] top-[80px] w-[140px] h-[264px] bg-[#161818] rounded-xl border-2 border-[#ADFF2F] shadow-[0_0_15px_rgba(173,255,47,0.05)] transition-all duration-300">
+        <div id="hud-sens-panel" class="absolute left-[638px] top-[80px] w-[140px] h-[264px] bg-[#161818] rounded-xl border-2 border-[#2FFFAD] shadow-[0_0_15px_rgba(47,255,173,0.05)] transition-all duration-300">
           <!-- Title -->
           <div class="absolute left-0 top-[10px] w-full text-center">
-            <span class="absolute left-0 right-0 top-[1px] text-[#004D20] text-xs font-bold font-mono tracking-wider" data-i18n="hud_sens_title">SPEED SENS</span>
-            <span class="relative text-[#ADFF2F] text-xs font-bold font-mono tracking-wider" data-i18n="hud_sens_title">SPEED SENS</span>
+            <span class="absolute left-0 right-0 top-[1px] text-[#005C37] text-xs font-bold font-mono tracking-wider" data-i18n="hud_sens_title">SPEED SENS</span>
+            <span class="relative text-[#2FFFAD] text-xs font-bold font-mono tracking-wider" data-i18n="hud_sens_title">SPEED SENS</span>
           </div>
           
           <!-- Display Value -->
@@ -325,17 +325,17 @@
           </div>
 
           <!-- [-] and [+] Controls -->
-          <button id="hud-sens-dec" class="absolute left-[20px] top-[90px] w-10 h-8 bg-[#202424] border border-[#3C4040] text-white text-lg font-bold rounded flex items-center justify-center cursor-pointer transition-all pb-1 hover:border-[#ADFF2F] hover:text-[#ADFF2F]">-</button>
-          <button id="hud-sens-inc" class="absolute left-[80px] top-[90px] w-10 h-8 bg-[#202424] border border-[#3C4040] text-white text-lg font-bold rounded flex items-center justify-center cursor-pointer transition-all pb-1 hover:border-[#ADFF2F] hover:text-[#ADFF2F]">+</button>
+          <button id="hud-sens-dec" class="absolute left-[20px] top-[90px] w-10 h-8 bg-[#202424] border border-[#3C4040] text-white text-lg font-bold rounded flex items-center justify-center cursor-pointer transition-all pb-1 hover:border-[#2FFFAD] hover:text-[#2FFFAD]">-</button>
+          <button id="hud-sens-inc" class="absolute left-[80px] top-[90px] w-10 h-8 bg-[#202424] border border-[#3C4040] text-white text-lg font-bold rounded flex items-center justify-center cursor-pointer transition-all pb-1 hover:border-[#2FFFAD] hover:text-[#2FFFAD]">+</button>
 
           <!-- PIXEL Toggle -->
-          <button id="hud-btn-pixel" class="absolute left-[20px] top-[130px] w-[100px] h-8 bg-[#202424] border border-[#3C4040] text-slate-300 text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:border-[#ADFF2F]" data-i18n="hud_pixel_off">PIXEL: OFF</button>
+          <button id="hud-btn-pixel" class="absolute left-[20px] top-[130px] w-[100px] h-8 bg-[#202424] border border-[#3C4040] text-slate-300 text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:border-[#2FFFAD]" data-i18n="hud_pixel_off">PIXEL: OFF</button>
           
           <!-- MAGNET Toggle -->
-          <button id="hud-btn-magnet" class="absolute left-[20px] top-[170px] w-[100px] h-8 bg-[#ADFF2F] border border-[#3C4040] text-slate-900 text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:brightness-110" data-i18n="hud_magnet_on">MAGNET: ON</button>
+          <button id="hud-btn-magnet" class="absolute left-[20px] top-[170px] w-[100px] h-8 bg-[#2FFFAD] border border-[#3C4040] text-slate-900 text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:brightness-110" data-i18n="hud_magnet_on">MAGNET: ON</button>
           
           <!-- VIEW DETAIL Toggle -->
-          <button id="hud-btn-detail" class="absolute left-[20px] top-[210px] w-[100px] h-8 bg-[#202424] border border-[#3C4040] text-[#888888] text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:border-[#ADFF2F]" data-i18n="hud_view_detail">VIEW DETAIL</button>
+          <button id="hud-btn-detail" class="absolute left-[20px] top-[210px] w-[100px] h-8 bg-[#202424] border border-[#3C4040] text-[#888888] text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:border-[#2FFFAD]" data-i18n="hud_view_detail">VIEW DETAIL</button>
 
           <!-- Pro Lock Overlay -->
           <div id="hud-lock-overlay" class="absolute inset-0 bg-[#0d0e0e]/95 rounded-xl flex flex-col items-center justify-center transition-all duration-300 opacity-0 pointer-events-none border border-[#3C4040]">
