@@ -134,7 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
       mac_coming_soon: "개발 예정",
       hero_badge: "⚡ Rust & Win32 Native Hooking Subsystem",
       hero_title: "키보드에 커서의 <br><span class=\"bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent\">날개를 달다.</span>",
-      hero_desc: "키서(Keysor)는 키보드(Keyboard) + 커서(Cursor)의 합성어로<br>키보드만으로 마우스를 대체하는 PC 유틸리티입니다.<br>0ms의 지연 시간과 편리한 인터페이스를 경험하세요.",
+      hero_desc: "키서(Keysor)는 키보드(Keyboard) + 커서(Cursor)의 합성어로 키보드만으로 마우스를 대체하는 PC 유틸리티입니다.<br>0ms의 지연 시간과 편리한 인터페이스를 경험하세요.",
       hero_btn_download_text: "Keysor 다운로드",
       hero_btn_download_win_text: "Windows용 다운로드",
       hero_btn_download_mac_text: "macOS용 다운로드",
