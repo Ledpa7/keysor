@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
       nav_download: "Download",
       mac_coming_soon: "Coming Soon",
       hero_badge: "⚡ Rust & Win32 Native Hooking Subsystem",
-      hero_title: "Give Wings to Cursor<br>on Your Keyboard.",
+      hero_title: "Give Wings to Cursor<br><span class=\"bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent\">on Your Keyboard.</span>",
       hero_desc: "Keysor, a portmanteau of Keyboard and Cursor, is a PC utility that replaces your mouse with keyboard controls. Experience 0ms latency and a convenient interface.",
       hero_btn_download_text: "Download Keysor",
       hero_btn_download_win_text: "Download for Windows",
