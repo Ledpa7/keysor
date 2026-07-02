@@ -122,7 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
       hud_locked_title: "Pro Feature Locked",
       hud_locked_msg: "This feature is only available in Keysor Pro. Would you like to purchase a Pro license?",
       hud_locked_close: "Close",
-      footer_copyright: "© 2026 Prism. All rights reserved."
+      footer_copyright: "© 2026 Priesm. All rights reserved."
     },
     ko: {
       title: "Keysor — 마우스 없는 마우스 커서 조작 유틸리티",
@@ -242,7 +242,7 @@ document.addEventListener('DOMContentLoaded', () => {
       hud_locked_title: "프로 기능 잠김",
       hud_locked_msg: "이 기능은 키서 프로(Keysor Pro) 전용 기능입니다. 지금 프로 라이선스를 구매하시겠습니까?",
       hud_locked_close: "닫기",
-      footer_copyright: "© 2026 Prism. All rights reserved."
+      footer_copyright: "© 2026 Priesm. All rights reserved."
     },
     zh: {
       title: "Keysor — 键盘操控鼠标光标实用工具",
@@ -362,7 +362,7 @@ document.addEventListener('DOMContentLoaded', () => {
       hud_locked_title: "专业功能已锁定",
       hud_locked_msg: "此功能仅在 Keysor Pro 中可用。您想购买专业版许可证吗？",
       hud_locked_close: "关闭",
-      footer_copyright: "© 2026 Prism. All rights reserved."
+      footer_copyright: "© 2026 Priesm. All rights reserved."
     }
   };
 
