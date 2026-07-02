@@ -790,6 +790,31 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
                 return HookResult::Pass;
             }
 
+            // Space + Scroll (R/F) 단축키 조합을 통한 맨 위/맨 아래 Page Jump 처리
+            if event.vk_code == VK_SPACE && event.is_keydown {
+                let mut page_jump_action = None;
+                {
+                    let state = state_arc.lock().unwrap();
+                    for &vk in &state.active_scroll_keys {
+                        if let Some(action) = state.vk_bindings.get(&vk) {
+                            if action == "MouseScrollUp" {
+                                page_jump_action = Some(true); // Top
+                                break;
+                            } else if action == "MouseScrollDown" {
+                                page_jump_action = Some(false); // Bottom
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                if let Some(to_top) = page_jump_action {
+                    println!("[Action] Space + Scroll Page Jump (to_top={})", to_top);
+                    get_system_controller().simulate_page_jump(to_top);
+                    return HookResult::Block;
+                }
+            }
+
             let unified_space = {
                 let state = state_arc.lock().unwrap();
                 state.config.settings.unified_space_click
