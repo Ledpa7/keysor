@@ -790,27 +790,56 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
                 return HookResult::Pass;
             }
 
-            // Space + Scroll (R/F) 단축키 조합을 통한 맨 위/맨 아래 Page Jump 처리
+            // Space + Scroll (R/F/Q/E) 단축키 조합을 통한 맨 위/아래/좌/우 Page Jump 처리
             if event.vk_code == VK_SPACE && event.is_keydown {
-                let mut page_jump_action = None;
+                let mut page_jump_action = None; // Some(0): Up, Some(1): Down, Some(2): Left, Some(3): Right
                 {
                     let state = state_arc.lock().unwrap();
                     for &vk in &state.active_scroll_keys {
                         if let Some(action) = state.vk_bindings.get(&vk) {
-                            if action == "MouseScrollUp" {
-                                page_jump_action = Some(true); // Top
-                                break;
-                            } else if action == "MouseScrollDown" {
-                                page_jump_action = Some(false); // Bottom
-                                break;
+                            match action.as_str() {
+                                "MouseScrollUp" => {
+                                    page_jump_action = Some(0);
+                                    break;
+                                }
+                                "MouseScrollDown" => {
+                                    page_jump_action = Some(1);
+                                    break;
+                                }
+                                "MouseScrollLeft" => {
+                                    page_jump_action = Some(2);
+                                    break;
+                                }
+                                "MouseScrollRight" => {
+                                    page_jump_action = Some(3);
+                                    break;
+                                }
+                                _ => {}
                             }
                         }
                     }
                 }
                 
-                if let Some(to_top) = page_jump_action {
-                    println!("[Action] Space + Scroll Page Jump (to_top={})", to_top);
-                    get_system_controller().simulate_page_jump(to_top);
+                if let Some(action_type) = page_jump_action {
+                    match action_type {
+                        0 => {
+                            println!("[Action] Space + Scroll Page Jump to Top");
+                            get_system_controller().simulate_page_jump(true);
+                        }
+                        1 => {
+                            println!("[Action] Space + Scroll Page Jump to Bottom");
+                            get_system_controller().simulate_page_jump(false);
+                        }
+                        2 => {
+                            println!("[Action] Space + Scroll Page Jump to Left");
+                            get_system_controller().scroll_horizontal(-10000);
+                        }
+                        3 => {
+                            println!("[Action] Space + Scroll Page Jump to Right");
+                            get_system_controller().scroll_horizontal(10000);
+                        }
+                        _ => {}
+                    }
                     return HookResult::Block;
                 }
             }
