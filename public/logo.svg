@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+    <rect width="100%" height="100%" fill="#121210" rx="128" />
+    <defs>
+        <linearGradient id="neon_green_grad" x1="256" y1="256" x2="431.52" y2="469.44" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#2FFFAD" />
+            <stop offset="100%" stop-color="#004D20" />
+        </linearGradient>
+    </defs>
+    <!-- 
+         Rotated and extended 32x32 original cursor coordinates expanded by 16x.
+         The vertical spine and diagonal endpoints are aligned exactly at the top (Y=256) and bottom (Y=469.44).
+         We align the start of the upper diagonal (p4_r) to X=256 to create a seamless connection without gap or bulge.
+         Centered inside 512x512 canvas via translation (-87.76, -106.72).
+    -->
+    <g transform="translate(-87.76, -106.72)">
+        <!-- 1. Thick Black Outline (Border Width: 64px) -->
+        <g stroke="#000000" stroke-width="64" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="256" y1="256" x2="256" y2="469.44" />
+            <line x1="256" y1="256" x2="431.52" y2="469.44" />
+            <line x1="256" y1="403.52" x2="398.08" y2="256" />
+        </g>
+        <!-- 2. Neon Gradient Line (Border Width: 40px) -->
+        <g stroke="url(#neon_green_grad)" stroke-width="40" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="256" y1="256" x2="256" y2="469.44" />
+            <line x1="256" y1="256" x2="431.52" y2="469.44" />
+            <line x1="256" y1="403.52" x2="398.08" y2="256" />
+        </g>
+    </g>
+</svg>

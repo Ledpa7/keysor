@@ -6,7 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const translations = {
     en: {
       title: "Keysor — Keyboard-only Mouse Cursor Controller",
-      description: "400KB ultra-lightweight, ultra-stable native mouse emulator powered by Rust and Win32 low-level hooks. Supports magnet snapping & custom hotkeys.",
+      description: "Under 3MB ultra-lightweight, ultra-stable native mouse emulator powered by Rust and Win32 low-level hooks. Supports magnet snapping & custom hotkeys.",
       nav_features: "Features",
       nav_sandbox: "Sandbox",
       nav_hotkeys: "Hotkeys",
@@ -42,7 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
       feature5_title: "High-Precision 100Hz Thread",
       feature5_desc: "Runs calculations on a dedicated 100Hz background thread mapped with DPI scales, maintaining a lag-free control loop even under heavy system loads.",
       feature6_title: "Ultra-lightweight Resource Usage",
-      feature6_desc: "Runs as a single portable 400KB binary, consuming less than 2MB of memory with CPU usage below 0.1% for maximum background efficiency.",
+      feature6_desc: "Runs as a single portable binary of under 3MB, consuming less than 2MB of memory with CPU usage below 0.1% for maximum background efficiency.",
       hotkeys_title: "Keysor Hotkeys & Control Layers",
       hotkeys_desc: "Manage three ergonomic control directions and helper shortcut sequences simultaneously with a single Caps Lock modifier key.",
       th_action: "Operation Type",
@@ -126,7 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
     },
     ko: {
       title: "Keysor — 마우스 없는 마우스 커서 조작 유틸리티",
-      description: "Rust와 Win32 저수준 훅으로 구현된 400KB 초경량 네이티브 마우스 에뮬레이터. 자석 흡착 모드 및 외부 앱 단축키 실행 지원.",
+      description: "Rust와 Win32 저수준 훅으로 구현된 3MB 미만 초경량 네이티브 마우스 에뮬레이터. 자석 흡착 모드 및 외부 앱 단축키 실행 지원.",
       nav_features: "주요 기능",
       nav_sandbox: "실시간 체험",
       nav_hotkeys: "단축키 가이드",
@@ -162,7 +162,7 @@ document.addEventListener('DOMContentLoaded', () => {
       feature5_title: "부드러운 100Hz 연산",
       feature5_desc: "마우스 이동 연산을 100Hz 백그라운드 스레드에서 디스플레이 배율과 연계하여 처리하므로, 게임이나 고부하 작업 중에도 부드러운 조작 감도가 항상 균일하게 유지됩니다.",
       feature6_title: "초경량 리소스 점유율",
-      feature6_desc: "단 400KB 크기의 포터블 파일로 구동되며, 메모리 2MB 미만 점유 및 CPU 0.1% 미만의 극대화된 백그라운드 실행 효율을 제공합니다.",
+      feature6_desc: "3MB 미만의 가벼운 단일 포터블 파일로 구동되며, 메모리 2MB 미만 점유 및 CPU 0.1% 미만의 극대화된 백그라운드 실행 효율을 제공합니다.",
       hotkeys_title: "키서 단축키 및 컨트롤 레이어",
       hotkeys_desc: "Caps Lock 키 하나로 상황에 맞춰 스왑하며 사용자는 키보드에서 손을 떼지 않는 최적의 사용자 경험과 조작 동선의 편의성을 제공합니다.",
       th_action: "동작 구분",
@@ -246,7 +246,7 @@ document.addEventListener('DOMContentLoaded', () => {
     },
     zh: {
       title: "Keysor — 键盘操控鼠标光标实用工具",
-      description: "基于 Rust 和 Win32 低级钩子实现的 400KB 超轻量、超稳定原生鼠标模拟器。支持磁铁吸附和自定义快捷键。",
+      description: "基于 Rust 和 Win32 低级钩子实现的 3MB 以下超轻量、超稳定原生鼠标模拟器。支持磁铁吸附和自定义快捷键。",
       nav_features: "主要功能",
       nav_sandbox: "实时体验",
       nav_hotkeys: "快捷键指南",
@@ -282,7 +282,7 @@ document.addEventListener('DOMContentLoaded', () => {
       feature5_title: "独立 100Hz 计算线程",
       feature5_desc: "将鼠标指针移动计算与 UI 主线程分离，采用独立的 100Hz 高精度线程处理并适配 DPI 缩放，即使在系统高负载下也能保持绝对流畅。",
       feature6_title: "超低系统资源占用",
-      feature6_desc: "采用无垃圾回收的 Rust 构建，仅 400KB 的便携式单文件，运行内存小于 2MB，CPU 占用率低于 0.1%，提供极其高效的后台运行。",
+      feature6_desc: "采用无垃圾回收的 Rust 构建，仅 3MB 以下的便携式单文件，运行内存小于 2MB，CPU 占用率低于 0.1%，提供极其高效的后台运行。",
       hotkeys_title: "Keysor 快捷键与控制层",
       hotkeys_desc: "仅需一个 Caps Lock 修饰键，即可同时管理三种符合人体工程学的控制流和便利快捷键序列。",
       th_action: "操作分类",

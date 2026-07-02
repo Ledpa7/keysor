@@ -36,6 +36,7 @@ pub static HUD_HOVER: AtomicU32 = AtomicU32::new(0); // 0: none, 1: minimize, 2:
 pub static HUD_LAST_SNAPPED: AtomicU32 = AtomicU32::new(0);
 pub static SHOW_ALL_SENS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub static CLICK_SCALE: OnceLock<Mutex<f32>> = OnceLock::new();
+pub static IS_INPUTTING_LICENSE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 use crate::ui::{KeysorUi, ClickType};
 
@@ -93,6 +94,7 @@ fn encode_wide(s: &str) -> Vec<u16> {
 }
 
 fn prompt_license_input(parent_hwnd: HWND, lang_en: bool) {
+    IS_INPUTTING_LICENSE.store(true, Ordering::SeqCst);
     // Hide parent HUD window during input to prevent focus/overlap issues
     if let Some(&hud) = HUD_HWND.get() {
         unsafe {
@@ -146,6 +148,7 @@ fn prompt_license_input(parent_hwnd: HWND, lang_en: bool) {
             }
 
             // Restore HUD window focus and refresh
+            IS_INPUTTING_LICENSE.store(false, Ordering::SeqCst);
             if let Some(&hud) = HUD_HWND.get() {
                 unsafe {
                     ShowWindow(hud, SW_SHOWNA);
@@ -373,7 +376,9 @@ unsafe extern "system" fn main_wnd_proc(
                     if state == 1 { // SIZE_MINIMIZED
                         ShowWindow(hud, SW_HIDE);
                     } else if state == 0 { // SIZE_RESTORED
-                        ShowWindow(hud, SW_SHOWNA);
+                        if !IS_INPUTTING_LICENSE.load(Ordering::SeqCst) {
+                            ShowWindow(hud, SW_SHOWNA);
+                        }
                     }
                 }
                 0
@@ -383,7 +388,9 @@ unsafe extern "system" fn main_wnd_proc(
                 println!("[Debug] main_wnd_proc WM_ACTIVATE: state={}", state);
                 if state != 0 { // Activated
                     if let Some(&hud) = HUD_HWND.get() {
-                        ShowWindow(hud, SW_SHOWNA);
+                        if !IS_INPUTTING_LICENSE.load(Ordering::SeqCst) {
+                            ShowWindow(hud, SW_SHOWNA);
+                        }
                     }
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -894,9 +901,12 @@ unsafe extern "system" fn hud_wnd_proc(
                     let state_arc = crate::hook::APP_STATE.get();
                     state_arc.map_or(false, |arc| arc.lock().unwrap().config.settings.lang_en.unwrap_or(false))
                 };
-                let is_pro = {
+                let (is_pro, is_trial) = {
                     let state_arc = crate::hook::APP_STATE.get();
-                    state_arc.map_or(false, |arc| arc.lock().unwrap().is_pro)
+                    state_arc.map_or((false, false), |arc| {
+                        let state = arc.lock().unwrap();
+                        (state.is_pro, state.is_trial)
+                    })
                 };
 
                 let q_desc = if lang_en { "Scl ◀" } else { "◀스크롤" };
@@ -917,11 +927,17 @@ unsafe extern "system" fn hud_wnd_proc(
                     } else {
                         "Keysor, 키보드와 커서를 하나로!".to_string()
                     }
-                } else if let Some(days) = crate::license::get_remaining_trial_days() {
-                    if lang_en {
-                        format!("Keysor Trial ({} days left)", days)
+                } else if is_trial {
+                    if let Some(days) = crate::license::get_remaining_trial_days() {
+                        if lang_en {
+                            format!("Keysor Trial ({} days left)", days)
+                        } else {
+                            format!("키서 평가판 ({}일 남음)", days)
+                        }
+                    } else if lang_en {
+                        "Keysor Free (Trial Expired)".to_string()
                     } else {
-                        format!("키서 평가판 ({}일 남음)", days)
+                        "키서 무료 버전 (평가판 만료)".to_string()
                     }
                 } else if lang_en {
                     "Keysor Free (Trial Expired)".to_string()
@@ -1078,12 +1094,13 @@ unsafe extern "system" fn hud_wnd_proc(
                 draw_key_cap(hdc, fonts.key, 516, 296, 48, 48, "Win", "", 0);
 
                 // Draw Speed Sensitivity Panel
-                let box_bg = if is_pro { 0x161818 } else { 0x0D0E0E };
+                let features_enabled = is_pro || is_trial;
+                let box_bg = if features_enabled { 0x161818 } else { 0x0D0E0E };
                 let box_brush = CreateSolidBrush(box_bg);
                 let old_box_brush = SelectObject(hdc, box_brush);
 
                 // 1. 스피드센서 박스 그림자 테두리
-                let shadow_color = if is_pro { 0x004D20 } else { 0x1A1C1C };
+                let shadow_color = if features_enabled { 0x004D20 } else { 0x1A1C1C };
                 let dark_box_pen = CreatePen(0, 2, shadow_color);
                 let old_box_pen = SelectObject(hdc, dark_box_pen);
                 RoundRect(hdc, 638 + 1, 80 + 1, 778 + 1, 344 + 1, 12, 12);
@@ -1091,7 +1108,7 @@ unsafe extern "system" fn hud_wnd_proc(
                 DeleteObject(dark_box_pen);
 
                 // 2. 스피드센서 박스 하이라이트 테두리
-                let border_color = if is_pro { 0xADFF2F } else { 0x3C4040 };
+                let border_color = if features_enabled { 0xADFF2F } else { 0x3C4040 };
                 let neon_box_pen = CreatePen(0, 2, border_color);
                 let old_box_pen = SelectObject(hdc, neon_box_pen);
                 RoundRect(hdc, 638, 80, 778, 344, 12, 12);
@@ -1103,12 +1120,12 @@ unsafe extern "system" fn hud_wnd_proc(
 
                 let sens_title = encode_wide(speed_sens_title);
                 // 1. SPEED SENS 타이틀 그림자 레이어
-                SetTextColor(hdc, if is_pro { 0x004D20 } else { 0x151515 });
+                SetTextColor(hdc, if features_enabled { 0x004D20 } else { 0x151515 });
                 let mut r_sens_title_dark = RECT { left: 638, top: 91, right: 778, bottom: 111 };
                 DrawTextW(hdc, sens_title.as_ptr(), sens_title.len() as i32 - 1, &mut r_sens_title_dark, 1 | 32);
 
                 // 2. SPEED SENS 타이틀 메인 레이어
-                SetTextColor(hdc, if is_pro { 0xADFF2F } else { 0x444444 });
+                SetTextColor(hdc, if features_enabled { 0xADFF2F } else { 0x444444 });
                 let mut r_sens_title = RECT { left: 638, top: 90, right: 778, bottom: 110 };
                 DrawTextW(hdc, sens_title.as_ptr(), sens_title.len() as i32 - 1, &mut r_sens_title, 1 | 32);
 
@@ -1292,7 +1309,7 @@ unsafe extern "system" fn hud_wnd_proc(
                 let x = (lparam & 0xFFFF) as i16;
                 let y = ((lparam >> 16) & 0xFFFF) as i16;
                 
-                let is_pro = crate::license::check_local_license() || crate::license::check_trial_status();
+                let is_pro = crate::license::check_local_license();
                 let prev_hover = HUD_HOVER.load(Ordering::SeqCst);
                 let hit = classify_hit_target(x, y, is_pro);
                 let new_hover = hit as u32;
@@ -1323,9 +1340,12 @@ unsafe extern "system" fn hud_wnd_proc(
                 let x = (lparam & 0xFFFF) as i16;
                 let y = ((lparam >> 16) & 0xFFFF) as i16;
                 
-                let is_pro = {
+                let (is_pro, is_trial) = {
                     let state_arc = crate::hook::APP_STATE.get();
-                    state_arc.map_or(false, |arc| arc.lock().unwrap().is_pro)
+                    state_arc.map_or((false, false), |arc| {
+                        let state = arc.lock().unwrap();
+                        (state.is_pro, state.is_trial)
+                    })
                 };
                 let lang_en = {
                     let state_arc = crate::hook::APP_STATE.get();
@@ -1354,7 +1374,7 @@ unsafe extern "system" fn hud_wnd_proc(
                         InvalidateRect(hwnd, std::ptr::null(), 0);
                     }
                     HudHitTarget::DecSensitivity | HudHitTarget::IncSensitivity | HudHitTarget::TogglePixelMode | HudHitTarget::ToggleMagnet | HudHitTarget::ToggleDetail => {
-                        if !is_pro {
+                        if !(is_pro || is_trial) {
                             let msg_text = if lang_en {
                                 "This feature is only available in Keysor Pro.\n\nWould you like to purchase a Pro license?"
                             } else {
@@ -1480,6 +1500,8 @@ pub fn start_indicator() {
             return;
         }
 
+        let arrow_cursor = windows_sys::Win32::UI::WindowsAndMessaging::LoadCursorW(0 as _, 32512 as *const u16);
+
         // 2. Register Indicator class
         let class_name_wide = encode_wide("KeysorIndicatorClass");
         let wnd_class = WNDCLASSW {
@@ -1489,7 +1511,7 @@ pub fn start_indicator() {
             cbWndExtra: 0,
             hInstance: instance,
             hIcon: 0,
-            hCursor: 0,
+            hCursor: arrow_cursor,
             hbrBackground: 0,
             lpszMenuName: std::ptr::null(),
             lpszClassName: class_name_wide.as_ptr(),
@@ -1509,7 +1531,7 @@ pub fn start_indicator() {
             cbWndExtra: 0,
             hInstance: instance,
             hIcon: 0,
-            hCursor: 0,
+            hCursor: arrow_cursor,
             hbrBackground: 0,
             lpszMenuName: std::ptr::null(),
             lpszClassName: hud_class_name.as_ptr(),

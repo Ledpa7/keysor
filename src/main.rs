@@ -61,9 +61,12 @@ fn main() {
     println!("[Info] Configuration loaded successfully.");
 
     // 2. 라이선스 상태 검증 및 평가판(14일) 여부 확인
-    let is_pro = license::check_local_license() || license::check_trial_status();
+    let is_pro = license::check_local_license();
+    let is_trial = license::check_trial_status();
     if is_pro {
         println!("[Info] Keysor Pro mode enabled.");
+    } else if is_trial {
+        println!("[Info] Keysor Trial mode enabled.");
     } else {
         println!("[Info] Keysor Free mode enabled (Standard key mappings active, Pro features locked).");
     }
@@ -81,7 +84,7 @@ fn main() {
     indicator::start_indicator();
 
     // 5. 백그라운드 윈도우 키보드 저수준 훅 스레드 구동
-    hook::start_hook(config, is_pro);
+    hook::start_hook(config, is_pro, is_trial);
     println!("[Info] Keysor active and listening to inputs in background.");
 
     // 6. 앱 비정상 종료 및 CTRL+C 시 훅 리소스를 OS에 강제 안전 반환하는 페일세이프 가드 등록

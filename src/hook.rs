@@ -36,6 +36,7 @@ pub struct AppState {
     pub vk_bindings: HashMap<u32, String>,
     pub is_mouse_mode: bool,
     pub is_pro: bool,
+    pub is_trial: bool,
     // Caps Lock 홀드 및 대소문자 전환용 타이머
     pub caps_lock_press_time: Option<Instant>,
     pub caps_lock_used_as_modifier: bool,
@@ -80,7 +81,7 @@ impl AppState {
         }
 
         let settings = &self.config.settings;
-        let (base_speed, max_speed, acceleration) = if self.is_pro {
+        let (base_speed, max_speed, acceleration) = if self.is_pro || self.is_trial {
             (settings.base_speed, settings.max_speed, settings.acceleration)
         } else {
             (1.5, 30.0, 1.5)
@@ -167,8 +168,12 @@ impl AppState {
 
     /// keysor.yaml의 실시간 변경 사항을 라이선스 인증 수준에 맞춰 안전하게 재로드 및 동적 갱신합니다.
     pub fn reload_configuration(&mut self, new_config: Config) {
-        let is_pro_now = crate::license::check_local_license() || crate::license::check_trial_status();
+        let is_pro_now = crate::license::check_local_license();
+        let is_trial_now = crate::license::check_trial_status();
         self.is_pro = is_pro_now;
+        self.is_trial = is_trial_now;
+
+        let features_enabled = is_pro_now || is_trial_now;
 
         // 설정 파일 변경을 통한 신규 라이선스 키 기입 시 실시간 백그라운드 재활성화
         if let Some(ref new_key) = new_config.settings.license_key {
@@ -178,13 +183,13 @@ impl AppState {
         }
 
         // Pro 버전 여부에 따른 강제 바인딩 정책
-        self.vk_bindings = if is_pro_now {
+        self.vk_bindings = if features_enabled {
             config::get_vk_bindings(&new_config)
         } else {
             config::get_vk_bindings(&config::Config::default())
         };
 
-        self.config = if is_pro_now {
+        self.config = if features_enabled {
             new_config
         } else {
             // Free 버전인 경우 감도, 키바인딩, 자석 스냅 설정을 디폴트로 강제 오버라이드
@@ -197,7 +202,7 @@ impl AppState {
             forced.settings.global_magnetic_mode = Some(false);
             forced
         };
-        println!("[Hot-Reload] New configuration evaluated and applied. Pro features: {}.", is_pro_now);
+        println!("[Hot-Reload] New configuration evaluated and applied. Pro features: {}.", features_enabled);
     }
 }
 
@@ -646,7 +651,7 @@ fn process_movement_and_actions(
     } else {
         if vk_code == VK_J {
             if is_keydown {
-                if state.is_pro {
+                if state.is_pro || state.is_trial {
                     pending_action = PendingMouseAction::TabLeft;
                 } else {
                     get_system_controller().beep();
@@ -656,7 +661,7 @@ fn process_movement_and_actions(
             return (HookResult::Block, pending_action);
         } else if vk_code == VK_K {
             if is_keydown {
-                if state.is_pro {
+                if state.is_pro || state.is_trial {
                     pending_action = PendingMouseAction::TabRight;
                 } else {
                     get_system_controller().beep();
@@ -693,7 +698,7 @@ fn process_movement_and_actions(
                     "MouseRightClick" => pending_action = PendingMouseAction::RightClick,
                     other => {
                         if other.starts_with("RunApp:") {
-                            if state.is_pro {
+                            if state.is_pro || state.is_trial {
                                 let app_path = other.trim_start_matches("RunApp:").trim().to_string();
                                 pending_action = PendingMouseAction::RunApp(app_path);
                             } else {
@@ -808,8 +813,9 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
 }
 
 /// 전역 키보드 훅 루프 시작 함수 (별도 독립 스레드에서 구동)
-pub fn start_hook(config: Config, is_pro: bool) {
-    let vk_bindings = if is_pro {
+pub fn start_hook(config: Config, is_pro: bool, is_trial: bool) {
+    let features_enabled = is_pro || is_trial;
+    let vk_bindings = if features_enabled {
         config::get_vk_bindings(&config)
     } else {
         config::get_vk_bindings(&config::Config::default())
@@ -825,6 +831,7 @@ pub fn start_hook(config: Config, is_pro: bool) {
         vk_bindings,
         is_mouse_mode: false,
         is_pro,
+        is_trial,
         caps_lock_press_time: None,
         caps_lock_used_as_modifier: false,
         space_press_time: None,
