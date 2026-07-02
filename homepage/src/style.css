@@ -63,20 +63,34 @@
 
 /* Custom Download Button Glow Effects */
 .btn-download-glow {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .btn-download-glow:hover {
-  transform: translateY(-2px) scale(1.03);
-  box-shadow: 0 0 35px rgba(47, 255, 173, 0.85);
+  transform: translateY(-4px) scale(1.05);
+  box-shadow: 0 0 45px rgba(47, 255, 173, 0.9), 0 0 15px rgba(47, 255, 173, 0.4);
   background-color: #7affbc; /* hover color (emerald-300) */
+}
+/* Spring animation for nested SVG on hover */
+.btn-download-glow svg {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.btn-download-glow:hover svg {
+  transform: scale(1.2) rotate(12deg);
 }
 
 .btn-free-download-glow {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .btn-free-download-glow:hover {
-  border-color: rgba(47, 255, 173, 0.5);
+  transform: translateY(-2px);
+  border-color: rgba(47, 255, 173, 0.7);
   color: #4dffa8;
-  box-shadow: 0 0 25px rgba(47, 255, 173, 0.35);
-  background-color: rgba(0, 51, 30, 0.25); /* emerald-950/25 */
+  box-shadow: 0 0 30px rgba(47, 255, 173, 0.45);
+  background-color: rgba(0, 51, 30, 0.35); /* emerald-950/35 */
+}
+.btn-free-download-glow svg {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.btn-free-download-glow:hover svg {
+  transform: scale(1.15) translateY(-1px);
 }
