@@ -1,3 +1,4 @@
 // keysor.rc
 // Application Icon definition
 1 ICON "keysor.ico"
+1 24 "keysor.manifest"

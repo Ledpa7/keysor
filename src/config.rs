@@ -158,6 +158,29 @@ bindings:
         Ok(cfg) => cfg,
         Err(e) => {
             eprintln!("[Warning] Config parse error: {}. Using default fallback configuration.", e);
+            
+            // 윈도우 네이티브 경고창 노출
+            unsafe {
+                let err_msg = e.to_string();
+                let lang_en = default_cfg.settings.lang_en.unwrap_or(true);
+                let msg = if lang_en {
+                    format!("Warning: Failed to load config file (keysor.yaml) due to a parsing error. Keysor has reverted to the default configuration.\n\nPlease check if the file contains invalid characters or has been saved with UTF-8 encoding (not ANSI/CP949).\n\nDetails: {}", err_msg)
+                } else {
+                    format!("경고: 설정 파일(keysor.yaml) 파싱 오류로 인해 기본 설정값으로 복원되었습니다.\n\n메모장 등으로 주석 수정 시 인코딩이 UTF-8로 저장되었는지 확인해 주세요. (ANSI/CP949 저장 시 인식 불가)\n\n상세 오류: {}", err_msg)
+                };
+                let title = if lang_en { "Keysor Config Warning" } else { "Keysor 설정 로드 경고" };
+                
+                let msg_wide: Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
+                let title_wide: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
+                
+                windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
+                    0,
+                    msg_wide.as_ptr(),
+                    title_wide.as_ptr(),
+                    0x30, // MB_ICONWARNING
+                );
+            }
+            
             default_cfg
         }
     }

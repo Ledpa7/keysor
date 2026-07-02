@@ -93,9 +93,129 @@ fn encode_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+static LICENSE_INPUT_RESULT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static INPUT_DIALOG_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static IS_LANG_EN_GLOBAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+unsafe extern "system" fn input_dialog_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    match msg {
+        WM_CREATE => {
+            // Static text
+            let static_text = if IS_LANG_EN_GLOBAL.load(Ordering::SeqCst) {
+                "Please enter your Keysor Pro license key:"
+            } else {
+                "발급받으신 Keysor Pro 라이선스 키를 입력해주세요:"
+            };
+            CreateWindowExW(
+                0,
+                encode_wide("STATIC").as_ptr(),
+                encode_wide(static_text).as_ptr(),
+                WS_CHILD | WS_VISIBLE,
+                20, 20, 380, 25,
+                hwnd,
+                0,
+                GetModuleHandleW(std::ptr::null()),
+                std::ptr::null(),
+            );
+
+            // Edit control (input text box)
+            // ID = 201
+            let edit_hwnd = CreateWindowExW(
+                WS_EX_CLIENTEDGE,
+                encode_wide("EDIT").as_ptr(),
+                encode_wide("").as_ptr(),
+                WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL as u32,
+                20, 50, 380, 25,
+                hwnd,
+                201,
+                GetModuleHandleW(std::ptr::null()),
+                std::ptr::null(),
+            );
+            windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(edit_hwnd);
+
+            // OK Button (ID = 101)
+            let ok_text = if IS_LANG_EN_GLOBAL.load(Ordering::SeqCst) { "OK" } else { "확인" };
+            CreateWindowExW(
+                0,
+                encode_wide("BUTTON").as_ptr(),
+                encode_wide(ok_text).as_ptr(),
+                WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON as u32,
+                200, 90, 90, 30,
+                hwnd,
+                101,
+                GetModuleHandleW(std::ptr::null()),
+                std::ptr::null(),
+            );
+
+            // Cancel Button (ID = 102)
+            let cancel_text = if IS_LANG_EN_GLOBAL.load(Ordering::SeqCst) { "Cancel" } else { "취소" };
+            CreateWindowExW(
+                0,
+                encode_wide("BUTTON").as_ptr(),
+                encode_wide(cancel_text).as_ptr(),
+                WS_CHILD | WS_VISIBLE,
+                310, 90, 90, 30,
+                hwnd,
+                102,
+                GetModuleHandleW(std::ptr::null()),
+                std::ptr::null(),
+            );
+            0
+        }
+        WM_COMMAND => {
+            let wm_id = wparam & 0xFFFF;
+            if wm_id == 101 { // OK
+                let edit_hwnd = GetDlgItem(hwnd, 201);
+                let mut buffer = [0u16; 512];
+                let len = GetWindowTextW(edit_hwnd, buffer.as_mut_ptr(), 512);
+                let input_str = if len > 0 {
+                    String::from_utf16_lossy(&buffer[..len as usize]).trim().to_string()
+                } else {
+                    "".to_string()
+                };
+                if let Some(lock) = LICENSE_INPUT_RESULT.get() {
+                    if let Ok(mut res) = lock.lock() {
+                        *res = Some(input_str);
+                    }
+                }
+                INPUT_DIALOG_ACTIVE.store(false, Ordering::SeqCst);
+                DestroyWindow(hwnd);
+            } else if wm_id == 102 { // Cancel
+                if let Some(lock) = LICENSE_INPUT_RESULT.get() {
+                    if let Ok(mut res) = lock.lock() {
+                        *res = None;
+                    }
+                }
+                INPUT_DIALOG_ACTIVE.store(false, Ordering::SeqCst);
+                DestroyWindow(hwnd);
+            }
+            0
+        }
+        WM_CLOSE => {
+            if let Some(lock) = LICENSE_INPUT_RESULT.get() {
+                if let Ok(mut res) = lock.lock() {
+                    *res = None;
+                }
+            }
+            INPUT_DIALOG_ACTIVE.store(false, Ordering::SeqCst);
+            DestroyWindow(hwnd);
+            0
+        }
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
 fn prompt_license_input(parent_hwnd: HWND, lang_en: bool) {
     IS_INPUTTING_LICENSE.store(true, Ordering::SeqCst);
-    // Hide parent HUD window during input to prevent focus/overlap issues
+    IS_LANG_EN_GLOBAL.store(lang_en, Ordering::SeqCst);
+
     if let Some(&hud) = HUD_HWND.get() {
         unsafe {
             ShowWindow(hud, SW_HIDE);
@@ -103,88 +223,149 @@ fn prompt_license_input(parent_hwnd: HWND, lang_en: bool) {
         }
     }
 
-    thread::spawn(move || {
-        let prompt_msg = if lang_en {
-            "Please enter your Keysor Pro license key:"
-        } else {
-            "발급받으신 Keysor Pro 라이선스 키를 입력해주세요:"
-        };
-        let title_msg = if lang_en {
+    thread::spawn(move || unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+        
+        let instance = GetModuleHandleW(std::ptr::null());
+        let class_name = encode_wide("KeysorInputDlgClass");
+        
+        static REGISTER_ONCE: std::sync::Once = std::sync::Once::new();
+        REGISTER_ONCE.call_once(|| {
+            let dlg_class = WNDCLASSW {
+                style: CS_HREDRAW | CS_VREDRAW,
+                lpfnWndProc: Some(input_dialog_proc),
+                cbClsExtra: 0,
+                cbWndExtra: 0,
+                hInstance: instance,
+                hIcon: 0,
+                hCursor: LoadCursorW(0 as _, 32512 as *const u16),
+                hbrBackground: 6 as _, // COLOR_WINDOW + 1
+                lpszMenuName: std::ptr::null(),
+                lpszClassName: class_name.as_ptr(),
+            };
+            RegisterClassW(&dlg_class);
+        });
+
+        // Initialize OnceLock for results
+        let result_lock = LICENSE_INPUT_RESULT.get_or_init(|| Mutex::new(None));
+        if let Ok(mut res) = result_lock.lock() {
+            *res = None;
+        }
+
+        // Center on screen
+        let screen_w = GetSystemMetrics(0);
+        let screen_h = GetSystemMetrics(1);
+        let dlg_w = 440;
+        let dlg_h = 180;
+        let dlg_x = (screen_w - dlg_w) / 2;
+        let dlg_y = (screen_h - dlg_h) / 2;
+
+        let title = if lang_en {
             "Register Keysor Pro License"
         } else {
             "Keysor Pro 라이선스 등록"
         };
 
-        let script = format!(
-            "[void][System.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic'); \
-             $key = [Microsoft.VisualBasic.Interaction]::InputBox('{}', '{}', ''); \
-             if ($key) {{ Write-Output $key }}",
-            prompt_msg, title_msg
+        // Disable parent HUD to make it modal
+        if let Some(&hud) = HUD_HWND.get() {
+            windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(hud, 0);
+        }
+
+        let dlg_hwnd = CreateWindowExW(
+            WS_EX_TOPMOST,
+            class_name.as_ptr(),
+            encode_wide(title).as_ptr(),
+            WS_POPUP | WS_CAPTION | WS_SYSMENU,
+            dlg_x, dlg_y, dlg_w, dlg_h,
+            parent_hwnd,
+            0,
+            instance,
+            std::ptr::null(),
         );
-                      
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            let output = std::process::Command::new("powershell")
-                .args(&[
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-Command",
-                    &script,
-                ])
-                .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                .output();
-                
-            let mut key_entered = false;
-            let mut key_val = String::new();
 
-            if let Ok(out) = output {
-                let key_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if !key_str.is_empty() {
-                    key_entered = true;
-                    key_val = key_str;
+        if dlg_hwnd != 0 {
+            ShowWindow(dlg_hwnd, SW_SHOW);
+            UpdateWindow(dlg_hwnd);
+            INPUT_DIALOG_ACTIVE.store(true, Ordering::SeqCst);
+            
+            let mut msg: MSG = std::mem::zeroed();
+            while INPUT_DIALOG_ACTIVE.load(Ordering::SeqCst) && GetMessageW(&mut msg, 0, 0, 0) > 0 {
+                if IsDialogMessageW(dlg_hwnd, &msg) == 0 {
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
                 }
             }
+        }
 
-            // Restore HUD window focus and refresh
-            IS_INPUTTING_LICENSE.store(false, Ordering::SeqCst);
-            if let Some(&hud) = HUD_HWND.get() {
-                unsafe {
-                    ShowWindow(hud, SW_SHOWNA);
-                    InvalidateRect(hud, std::ptr::null(), 0);
-                }
+        // Re-enable HUD and restore visibility
+        if let Some(&hud) = HUD_HWND.get() {
+            windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(hud, 1);
+            ShowWindow(hud, SW_SHOWNA);
+            // Set focus back to HUD
+            windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(hud);
+        }
+        IS_INPUTTING_LICENSE.store(false, Ordering::SeqCst);
+
+        // Process activation asynchronously
+        let key_opt = {
+            if let Ok(res) = result_lock.lock() {
+                res.clone()
+            } else {
+                None
             }
+        };
 
-            if key_entered {
+        if let Some(key) = key_opt {
+            if !key.is_empty() {
+                // Save key to config
                 if let Some(state_arc) = crate::hook::APP_STATE.get() {
                     let mut config_to_save = None;
                     if let Ok(mut state) = state_arc.lock() {
-                        state.config.settings.license_key = Some(key_val.clone());
+                        state.config.settings.license_key = Some(key.clone());
                         config_to_save = Some(state.config.clone());
                     }
                     if let Some(cfg) = config_to_save {
                         crate::config::save_config(&cfg);
-                        crate::license::start_auto_activation_worker(key_val.clone());
-                        
-                        let success_msg = if lang_en {
-                            "License key saved. Connecting to activation server..."
-                        } else {
-                            "라이선스 키가 설정에 저장되었습니다.\n실시간 라이선스 인증을 시도하는 중입니다..."
-                        };
-                        let success_title = if lang_en { "License Saved" } else { "라이선스 저장 완료" };
-                        
-                        unsafe {
-                            windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
-                                parent_hwnd,
-                                encode_wide(success_msg).as_ptr(),
-                                encode_wide(success_title).as_ptr(),
-                                0x40, // MB_ICONINFORMATION
-                            );
-                        }
                     }
                 }
+
+                // Async activation
+                thread::spawn(move || {
+                    match crate::license::activate_license(&key) {
+                        Ok(msg) => {
+                            if let Some(state_arc) = crate::hook::APP_STATE.get() {
+                                if let Ok(mut state) = state_arc.lock() {
+                                    state.is_pro = true;
+                                }
+                            }
+                            if let Some(&hud) = HUD_HWND.get() {
+                                InvalidateRect(hud, std::ptr::null(), 0);
+                            }
+                            
+                            let success_title = if lang_en { "Success" } else { "성공" };
+                            unsafe {
+                                MessageBoxW(
+                                    parent_hwnd,
+                                    encode_wide(&msg).as_ptr(),
+                                    encode_wide(success_title).as_ptr(),
+                                    0x40, // MB_ICONINFORMATION
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            let err_title = if lang_en { "Error" } else { "오류" };
+                            unsafe {
+                                MessageBoxW(
+                                    parent_hwnd,
+                                    encode_wide(&e).as_ptr(),
+                                    encode_wide(err_title).as_ptr(),
+                                    0x10, // MB_ICONERROR
+                                );
+                            }
+                        }
+                    }
+                });
             }
         }
     });
