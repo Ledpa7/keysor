@@ -261,3 +261,4 @@ graph TD
 > 1. 현재 빌드된 초경량 바이너리는 [keysor.exe](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/target/release/keysor.exe) 경로에 위치하고 있으며, 자동 릴리즈 빌드 완료 상태입니다.
 > 2. 구축된 홈페이지는 [http://localhost:5173/](http://localhost:5173/) 주소에서 작동 중이며 대화형 키서 시뮬레이션을 내장하고 있습니다.
 > 3. 향후 홈페이지의 모던 다크 테마 디자인과 함께 윈도우 인스톨러 배포, Tauri GUI 제어판 연결 등을 이어서 추진할 예정입니다.
+> 4. **[보류/메모]** 향후 서비스 고도화 및 스케일업 시점에 **Supabase를 연동하여 기기별 UUID 매핑 통제, 사용자 이메일 계정 기반의 구매자 포털 구축, 원격 공지사항 연동**을 설계 및 반영할 예정입니다. (현재 1.0 초기 버전은 Lemon Squeezy의 기본 관리자/조회 인프라만 활용하여 유지보수성을 극대화함.)

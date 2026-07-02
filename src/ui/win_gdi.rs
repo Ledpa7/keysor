@@ -99,6 +99,7 @@ fn prompt_license_input(parent_hwnd: HWND, lang_en: bool) {
     if let Some(&hud) = HUD_HWND.get() {
         unsafe {
             ShowWindow(hud, SW_HIDE);
+            clear_magnetic_snapping();
         }
     }
 
@@ -375,6 +376,7 @@ unsafe extern "system" fn main_wnd_proc(
                 if let Some(&hud) = HUD_HWND.get() {
                     if state == 1 { // SIZE_MINIMIZED
                         ShowWindow(hud, SW_HIDE);
+                        clear_magnetic_snapping();
                     } else if state == 0 { // SIZE_RESTORED
                         if !IS_INPUTTING_LICENSE.load(Ordering::SeqCst) {
                             ShowWindow(hud, SW_SHOWNA);
@@ -1389,7 +1391,7 @@ unsafe extern "system" fn hud_wnd_proc(
                             );
                             if ret == 1 { // IDOK
                                 std::process::Command::new("cmd")
-                                    .args(&["/C", "start", "https://merlinmultillm.lemonsqueezy.com/checkout/buy/d2e207ea-12fc-4fe7-83e3-1d44db528c82?discount=0"])
+                                    .args(&["/C", "start", "https://keysor.vercel.app/#pricing"])
                                     .spawn()
                                     .ok();
                             }
@@ -1419,7 +1421,7 @@ unsafe extern "system" fn hud_wnd_proc(
 
                     HudHitTarget::BuyProTop => {
                         std::process::Command::new("cmd")
-                            .args(&["/C", "start", "https://merlinmultillm.lemonsqueezy.com/checkout/buy/d2e207ea-12fc-4fe7-83e3-1d44db528c82?discount=0"])
+                            .args(&["/C", "start", "https://keysor.vercel.app/#pricing"])
                             .spawn()
                             .ok();
                         InvalidateRect(hwnd, std::ptr::null(), 0);
@@ -1678,6 +1680,7 @@ pub fn hide_indicator() {
             ShowWindow(hwnd, SW_HIDE);
         }
     }
+    clear_magnetic_snapping();
 }
 
 pub fn update_indicator_position() {
@@ -2577,6 +2580,15 @@ pub fn is_currently_snapped() -> bool {
         false
     };
     hud_snapped || global_snapped
+}
+
+pub fn clear_magnetic_snapping() {
+    HUD_LAST_SNAPPED.store(0, std::sync::atomic::Ordering::SeqCst);
+    if let Some(lock) = LAST_GLOBAL_SNAPPED_POS.get() {
+        if let Ok(mut pos) = lock.lock() {
+            *pos = None;
+        }
+    }
 }
 
 fn log_debug(msg: &str) {
