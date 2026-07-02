@@ -197,7 +197,7 @@ document.addEventListener('DOMContentLoaded', () => {
       free_btn_win: "Windows 기본 버전 다운로드 (.exe)",
       free_btn_mac: "macOS 기본 버전 다운로드 (.zip)",
       pro_edition: "PRO EDITION",
-      pro_title: "프로 생산성 에디션",
+      pro_title: "프로 에디션",
       pro_desc: "자석 스냅 이동 및 단축키 커스텀으로 최상의 작업 속도 제공",
       pro_price_original: "$7.99",
       pro_price: "$3.99",
