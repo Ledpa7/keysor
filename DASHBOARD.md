@@ -17,7 +17,24 @@
 
 ---
 
-## 📅 최신 패치 및 수정 내역 (Latest Updates - 2026-07-02)
+## 📅 최신 패치 및 수정 내역 (Latest Updates - 2026-07-03)
+
+- **[x] UAC 자동 관리자 권한(requireAdministrator) 연동**:
+  - `keysor.manifest` 파일을 신설하고 `keysor.rc`에 매니페스트 리소스를 바인딩하여, 프로그램 실행 시 자동으로 관리자 권한 UAC 승인을 획득하도록 설정했습니다.
+  - 이를 통해 관리자 권한으로 실행된 작업 관리자, 명령 프롬프트(CMD), 브라우저 등 시스템 보안 등급이 높은 창 위에서도 마우스 조작과 단축키 훅이 차단(UIPI 격리)되지 않고 100% 원활하게 동작하도록 안전성을 보완했습니다.
+- **[x] PowerShell 의존성을 100% 제거한 Win32 네이티브 입력 모달 구축**:
+  - 기존 닷넷 파워쉘 `InputBox`를 백그라운드 자식 프로세스로 호출하던 구조를 완전히 철폐했습니다. 이로 인해 타 PC 환경의 백신 사전 방역 솔루션이 파워쉘 구동을 악성 행위로 진단하여 입력창을 강제 차단하던 호환성 오류를 원천 차단했습니다.
+  - Win32 SDK 내장 컨트롤(`EDIT`, `BUTTON`, `STATIC` 등)들과 모달용 메시지 루프(`IsDialogMessageW`)를 직접 작성한 경량 네이티브 입력 대화창 모달을 구현하여 Keysor 바이너리 내에 이식했습니다.
+  - 라이선스 활성화 처리 결과(성공 및 오류 메시지)를 유저가 인지하기 좋도록 네이티브 `MessageBoxW`로 연결했습니다.
+- **[x] YAML 설정 로드 인코딩 오류 발생 시 시각적 경고 메시지박스 안내**:
+  - 메모장 등으로 주석을 편집하다 인코딩 형식을 UTF-8이 아닌 ANSI(CP949) 등으로 잘못 저장하여 `serde_yaml` 파싱 오류가 발생하는 경우, 단순 메모리 기본값 폴백에 그치지 않고 네이티브 `MessageBoxW` 경고 팝업을 띄우도록 보완했습니다.
+  - 이를 통해 사용자가 설정이 왜 기본값으로 초기화되었는지 직관적으로 에러 내용을 인지하고 조치할 수 있도록 개선했습니다.
+- **[x] 홈페이지 가독성 텍스트 튜닝 및 부제목 다국어 줄바꿈 정돈**:
+  - 홈페이지 내 Pro 에디션의 요금제 명칭을 기존 `프로 생산성 에디션`에서 보다 깔끔하고 직관적인 **`프로 에디션`**으로 축소 변경했습니다.
+  - 주요 성능 안내 피처 그리드의 타이틀을 `대각선 이동 속도 보정` -> **`대각선 속도 보정`**으로 다듬고, 설명 문구 또한 불필요한 수학 기호(`sqrt(2)`)를 제거한 깔끔한 설명 문장으로 단순화했습니다.
+  - 한국어(`ko`), 영어(`en`), 중국어(`zh`) 번역 딕셔너리 내부의 부제목 카테고리(`features_desc`, `hotkeys_desc`, `pricing_desc`)에 자연스러운 위치의 개행 태그(`<br>`)를 각각 삽입하여, 다국어 환경 전반의 가로 폭 대칭 밸런스와 가독성을 정돈하여 빌드 및 배포 완료했습니다.
+
+## 📅 이전 패치 및 수정 내역 (Previous Updates - 2026-07-02)
 
 - **[x] 고해상도(DPI) 화면 팝업창 축소 및 커서 삐침 버그 해결 (DPI Auto-Scaling Fix)**:
   - `src/main.rs`의 `SetProcessDPIAware()` 호출을 주석 처리하고 OS(DWM)에 창 스케일링을 위임하여, 4K/QHD 등 고배율 모니터에서 Keysor 팝업창(HUD)과 초록색 마우스 인디케이터가 비정상적으로 조그맣게 나오던 문제를 근본적으로 예방했습니다.
@@ -215,6 +232,7 @@ graph TD
 ├── [Cargo.toml](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/Cargo.toml)                  # Rust 패키지 빌드 설정 및 Win32 피처 활성화
 ├── [build.rs](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/build.rs)                      # 리소스 자동 빌드 감지 및 컴파일러 지시자 설정
 ├── [keysor.rc](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/keysor.rc)                    # Windows 리소스 정보 지시 파일 (아이콘 ID 지정)
+├── [keysor.manifest](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/keysor.manifest)              # [NEW] 실행 시 UAC 관리자 권한 승인을 요구하는 매니페스트 기술서
 ├── [keysor.ico](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/keysor.ico)                   # 28% 라운드가 적용된 키서 공식 아이콘 (DIB 형식)
 ├── [keysor.yaml](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/keysor.yaml)                 # 사용자 커스텀 단축키 설정 템플릿 (초기 빌드용)
 ├── [DASHBOARD.md](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/DASHBOARD.md)               # 본 프로젝트 대시보드 문서
