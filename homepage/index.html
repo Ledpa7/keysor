@@ -416,45 +416,79 @@
       <table class="w-full text-left border-collapse">
         <thead>
           <tr class="border-b border-slate-800 bg-slate-900/50">
-            <th data-i18n="th_action" class="p-4 text-sm font-semibold text-slate-300">Operation Type</th>
-            <th data-i18n="th_key" class="p-4 text-sm font-semibold text-slate-300">Default Keybinding</th>
+            <th data-i18n="th_action" class="p-4 text-sm font-semibold text-slate-300 w-2/5">Operation & Keybinding</th>
             <th data-i18n="th_desc" class="p-4 text-sm font-semibold text-slate-300">Detailed Description</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-900 text-sm">
           <tr>
-            <td data-i18n="td_toggle_title" class="p-4 font-bold text-white">Mode Toggle (ON/OFF)</td>
-            <td class="p-4"><kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-emerald-400">Caps Lock (Hold)</kbd></td>
+            <td class="p-4">
+              <div data-i18n="td_toggle_title" class="font-bold text-white mb-2">Mode Toggle (ON/OFF)</div>
+              <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-emerald-400">Caps Lock (Hold)</kbd>
+            </td>
             <td data-i18n="td_toggle_desc" class="p-4 text-slate-400">Press and hold to activate Keysor mode (mouse emulation), which automatically minimizes the window. A single tap acts as a normal Caps Lock toggle.</td>
           </tr>
           <tr>
-            <td data-i18n="td_move_title" class="p-4 font-bold text-white">Move Cursor</td>
-            <td class="p-4"><kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">W / A / S / D</kbd> or <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Arrow keys</kbd></td>
+            <td class="p-4">
+              <div data-i18n="td_move_title" class="font-bold text-white mb-2">Move Cursor</div>
+              <div class="flex flex-wrap gap-1.5">
+                <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">W / A / S / D</kbd>
+                <span class="text-slate-500 text-xs self-center">or</span>
+                <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Arrow keys</kbd>
+              </div>
+            </td>
             <td data-i18n="td_move_desc" class="p-4 text-slate-400">Supports vertical and horizontal movement, with smooth acceleration (Lerp) based on key press duration.</td>
           </tr>
           <tr>
-            <td data-i18n="td_click_title" class="p-4 font-bold text-white">Click & Drag</td>
-            <td class="p-4"><kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Spacebar</kbd> / <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">G</kbd> / <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Right-Shift</kbd></td>
+            <td class="p-4">
+              <div data-i18n="td_click_title" class="font-bold text-white mb-2">Click & Drag</div>
+              <div class="flex flex-wrap gap-1.5">
+                <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Spacebar</kbd>
+                <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">G</kbd>
+                <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Right-Shift</kbd>
+              </div>
+            </td>
             <td data-i18n="td_click_desc" class="p-4 text-slate-400">Tap Spacebar once to left-click, double-tap to double-click, and hold to toggle drag mode. G or Right-Shift acts as right-click.</td>
           </tr>
           <tr>
-            <td data-i18n="td_scroll_title" class="p-4 font-bold text-white">Scroll Screen</td>
-            <td class="p-4"><kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">R</kbd> (Up) / <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">F</kbd> (Down) / <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Q / E</kbd> (Horizontal Wheel)</td>
+            <td class="p-4">
+              <div data-i18n="td_scroll_title" class="font-bold text-white mb-2">Scroll Screen</div>
+              <div class="flex flex-wrap gap-1.5">
+                <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">R</kbd>
+                <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">F</kbd>
+                <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Q / E</kbd>
+              </div>
+            </td>
             <td data-i18n="td_scroll_desc" class="p-4 text-slate-400">Emulates mouse scroll wheels smoothly via keyboard, eliminating fatigue during navigation and web browsing.</td>
           </tr>
           <tr>
-            <td data-i18n="td_nav_title" class="p-4 font-bold text-white">Web Browser Navigation</td>
-            <td class="p-4"><kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Shift + Q</kbd> (Back) / <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Shift + E</kbd> (Forward)</td>
+            <td class="p-4">
+              <div data-i18n="td_nav_title" class="font-bold text-white mb-2">Web Browser Navigation</div>
+              <div class="flex flex-wrap gap-1.5">
+                <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Shift + Q</kbd>
+                <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Shift + E</kbd>
+              </div>
+            </td>
             <td data-i18n="td_nav_desc" class="p-4 text-slate-400">Sends native Windows back/forward message codes directly to avoid key sequence conflicts, ensuring 100% reliability.</td>
           </tr>
           <tr>
-            <td data-i18n="td_vdesk_title" class="p-4 font-bold text-white">Virtual Desktop Navigation</td>
-            <td class="p-4"><kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Shift + J</kbd> (Left) / <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Shift + K</kbd> (Right)</td>
+            <td class="p-4">
+              <div data-i18n="td_vdesk_title" class="font-bold text-white mb-2">Virtual Desktop Navigation</div>
+              <div class="flex flex-wrap gap-1.5">
+                <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Shift + J</kbd>
+                <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Shift + K</kbd>
+              </div>
+            </td>
             <td data-i18n="td_vdesk_desc" class="p-4 text-slate-400">Instantly switches virtual desktops left/right by sending Windows Ctrl+Win+Left/Right Arrow key codes.</td>
           </tr>
           <tr>
-            <td data-i18n="td_bypass_title" class="p-4 font-bold text-white">Enter / Backspace Bypass</td>
-            <td class="p-4"><kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Enter</kbd> / <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Backspace</kbd></td>
+            <td class="p-4">
+              <div data-i18n="td_bypass_title" class="font-bold text-white mb-2">Enter / Backspace Bypass</div>
+              <div class="flex flex-wrap gap-1.5">
+                <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Enter</kbd>
+                <kbd class="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-300">Backspace</kbd>
+              </div>
+            </td>
             <td data-i18n="td_bypass_desc" class="p-4 text-slate-400">Enter and Backspace keys bypass the emulator during active mouse mode, allowing normal typing buffers.</td>
           </tr>
         </tbody>
