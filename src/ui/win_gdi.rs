@@ -881,8 +881,8 @@ enum HudHitTarget {
     LicenseTop = 11,
 }
 
-fn classify_hit_target(x: i16, y: i16, is_pro: bool) -> HudHitTarget {
-    if !is_pro {
+fn classify_hit_target(x: i16, y: i16, features_enabled: bool) -> HudHitTarget {
+    if !features_enabled {
         if y >= 80 && y <= 344 && x >= 638 && x <= 778 {
             return HudHitTarget::ToggleMagnet;
         }
@@ -898,7 +898,7 @@ fn classify_hit_target(x: i16, y: i16, is_pro: bool) -> HudHitTarget {
         if x >= 662 && x <= 712 {
             return HudHitTarget::ToggleLanguage;
         } else if x >= 430 && x <= 540 {
-            if !is_pro {
+            if !features_enabled {
                 return HudHitTarget::BuyProTop;
             }
         } else if x >= 546 && x <= 656 {
@@ -1318,7 +1318,7 @@ unsafe extern "system" fn hud_wnd_proc(
                         let state_arc = crate::hook::APP_STATE.get();
                         state_arc.map_or((1.0, 30.0, 1.5), |arc| {
                             let state = arc.lock().unwrap();
-                            if state.is_pro {
+                            if state.is_pro || state.is_trial {
                                 (
                                     state.config.settings.base_speed,
                                     state.config.settings.max_speed,
@@ -1331,7 +1331,7 @@ unsafe extern "system" fn hud_wnd_proc(
                     };
                     
                     let old_font_txt = SelectObject(hdc, fonts.text);
-                    SetTextColor(hdc, if is_pro { 0xFFFFFF } else { 0x333333 });
+                    SetTextColor(hdc, if is_pro || is_trial { 0xFFFFFF } else { 0x333333 });
                     
                     let line1 = encode_wide(&format!("Base : {:.1}", base_speed));
                     let mut r_l1 = RECT { left: 653, top: 114, right: 773, bottom: 132 };
@@ -1351,7 +1351,7 @@ unsafe extern "system" fn hud_wnd_proc(
                         let state_arc = crate::hook::APP_STATE.get();
                         state_arc.map_or(1.0, |arc| {
                             let state = arc.lock().unwrap();
-                            if state.is_pro {
+                            if state.is_pro || state.is_trial {
                                 state.config.settings.base_speed
                             } else {
                                 1.0
@@ -1359,7 +1359,7 @@ unsafe extern "system" fn hud_wnd_proc(
                         })
                     };
                     let old_font_number = SelectObject(hdc, fonts.number);
-                    SetTextColor(hdc, if is_pro { 0xFFFFFF } else { 0x333333 });
+                    SetTextColor(hdc, if is_pro || is_trial { 0xFFFFFF } else { 0x333333 });
                     let sens_val_text = encode_wide(&format!("{:.1}", sens_val));
                     let mut r_sens_val = RECT { left: 638, top: 114, right: 778, bottom: 159 };
                     DrawTextW(hdc, sens_val_text.as_ptr(), sens_val_text.len() as i32 - 1, &mut r_sens_val, 1 | 32);
@@ -1367,7 +1367,7 @@ unsafe extern "system" fn hud_wnd_proc(
                 }
 
                 // Draw [-] Button
-                let (dec_bg, dec_border, dec_text_color) = if !is_pro {
+                let (dec_bg, dec_border, dec_text_color) = if !(is_pro || is_trial) {
                     (0x121414, 0x222222, 0x333333)
                 } else if hover_val == 3 {
                     (0x3C4040, 0xADFF2F, 0xADFF2F)
@@ -1377,7 +1377,7 @@ unsafe extern "system" fn hud_wnd_proc(
                 draw_hud_button(hdc, 658, 170, 698, 202, 6, dec_bg, dec_border, dec_text_color, "-", fonts.number, 1 | 32, -8);
 
                 // Draw [+] Button
-                let (inc_bg, inc_border, inc_text_color) = if !is_pro {
+                let (inc_bg, inc_border, inc_text_color) = if !(is_pro || is_trial) {
                     (0x121414, 0x222222, 0x333333)
                 } else if hover_val == 4 {
                     (0x3C4040, 0xADFF2F, 0xADFF2F)
@@ -1387,7 +1387,7 @@ unsafe extern "system" fn hud_wnd_proc(
                 draw_hud_button(hdc, 718, 170, 758, 202, 6, inc_bg, inc_border, inc_text_color, "+", fonts.title, 1 | 32, -1);
 
                 // Draw Pixel Mode Toggle Button
-                let (pm_bg, pm_border, pm_text_color) = if !is_pro {
+                let (pm_bg, pm_border, pm_text_color) = if !(is_pro || is_trial) {
                     (0x121414, 0x222222, 0x333333)
                 } else if pm_enabled {
                     if hover_val == 5 { (0xBCFF7A, 0xADFF2F, 0xFFFFFF) } else { (0xADFF2F, 0x3C4040, 0xFFFFFF) }
@@ -1406,7 +1406,7 @@ unsafe extern "system" fn hud_wnd_proc(
                     let state_arc = crate::hook::APP_STATE.get();
                     state_arc.map_or(false, |arc| arc.lock().unwrap().config.settings.magnetic_mode.unwrap_or(false))
                 };
-                let (mag_bg, mag_border, mag_text_color) = if !is_pro {
+                let (mag_bg, mag_border, mag_text_color) = if !(is_pro || is_trial) {
                     (0x121414, 0x222222, 0x333333)
                 } else if magnet_enabled {
                     if hover_val == 7 { (0xBCFF7A, 0xADFF2F, 0xFFFFFF) } else { (0xADFF2F, 0x3C4040, 0xFFFFFF) }
@@ -1422,7 +1422,7 @@ unsafe extern "system" fn hud_wnd_proc(
 
                 // Draw SENS INFO (Detail) Toggle Button
                 let sens_info_enabled = SHOW_ALL_SENS.load(Ordering::SeqCst);
-                let (si_bg, si_border, si_text_color) = if !is_pro {
+                let (si_bg, si_border, si_text_color) = if !(is_pro || is_trial) {
                     (0x121414, 0x222222, 0x333333)
                 } else if sens_info_enabled {
                     if hover_val == 8 { (0xBCFF7A, 0xADFF2F, 0xFFFFFF) } else { (0xADFF2F, 0x3C4040, 0xFFFFFF) }
@@ -1436,7 +1436,7 @@ unsafe extern "system" fn hud_wnd_proc(
                 };
                 draw_hud_button(hdc, 658, 290, 758, 322, 6, si_bg, si_border, si_text_color, si_label_str, fonts.key, 37, 0);
 
-                if !is_pro {
+                if !(is_pro || is_trial) {
                     let lock_icon = encode_wide("🔒");
                     let old_font_icon = SelectObject(hdc, fonts.title);
                     SetTextColor(hdc, 0x777777);
@@ -1499,9 +1499,15 @@ unsafe extern "system" fn hud_wnd_proc(
                 let x = (lparam & 0xFFFF) as i16;
                 let y = ((lparam >> 16) & 0xFFFF) as i16;
                 
-                let is_pro = crate::license::check_local_license();
+                let (is_pro, is_trial) = {
+                    let state_arc = crate::hook::APP_STATE.get();
+                    state_arc.map_or((false, false), |arc| {
+                        let state = arc.lock().unwrap();
+                        (state.is_pro, state.is_trial)
+                    })
+                };
                 let prev_hover = HUD_HOVER.load(Ordering::SeqCst);
-                let hit = classify_hit_target(x, y, is_pro);
+                let hit = classify_hit_target(x, y, is_pro || is_trial);
                 let new_hover = hit as u32;
                 
                 if new_hover != prev_hover {
@@ -1542,7 +1548,7 @@ unsafe extern "system" fn hud_wnd_proc(
                     state_arc.map_or(false, |arc| arc.lock().unwrap().config.settings.lang_en.unwrap_or(false))
                 };
                 
-                let hit = classify_hit_target(x, y, is_pro);
+                let hit = classify_hit_target(x, y, is_pro || is_trial);
                 match hit {
                     HudHitTarget::Minimize => {
                         if let Some(&main_hwnd) = MAIN_HWND.get() {
@@ -2087,15 +2093,15 @@ fn find_adjacent_target(
 
 pub fn check_magnetic_snapping() {
     let state_arc = crate::hook::APP_STATE.get();
-    let (enabled, is_dragging, is_pro) = state_arc.map_or((false, false, false), |arc| {
+    let (enabled, is_dragging, features_enabled) = state_arc.map_or((false, false, false), |arc| {
         let state = arc.lock().unwrap();
         (
             state.config.settings.magnetic_mode.unwrap_or(false),
             state.is_dragging,
-            state.is_pro,
+            state.is_pro || state.is_trial,
         )
     });
-    if !enabled || is_dragging || !is_pro {
+    if !enabled || is_dragging || !features_enabled {
         HUD_LAST_SNAPPED.store(0, std::sync::atomic::Ordering::SeqCst);
         return;
     }
@@ -2533,17 +2539,17 @@ pub fn start_global_targets_thread() {
 
 pub fn check_global_magnetic_snapping() {
     let state_arc = crate::hook::APP_STATE.get();
-    let (enabled, is_mouse_mode, is_dragging, is_pro) = state_arc.map_or((false, false, false, false), |arc| {
+    let (enabled, is_mouse_mode, is_dragging, features_enabled) = state_arc.map_or((false, false, false, false), |arc| {
         let state = arc.lock().unwrap();
         (
             state.config.settings.global_magnetic_mode.unwrap_or(false),
             state.is_mouse_mode,
             state.is_dragging,
-            state.is_pro,
+            state.is_pro || state.is_trial,
         )
     });
     
-    if !enabled || !is_mouse_mode || is_dragging || !is_pro {
+    if !enabled || !is_mouse_mode || is_dragging || !features_enabled {
         if let Some(lock) = LAST_GLOBAL_SNAPPED_POS.get() {
             if let Ok(mut pos) = lock.lock() {
                 *pos = None;
