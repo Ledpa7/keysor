@@ -11,7 +11,7 @@ Here are 3 distinct homepage concepts for Keysor, designed with unique visual st
     *   **Hero Section**: Bold headline ("Control Your Mouse at the Speed of Thought") with a large glowing mockup of Keysor in action.
     *   **Interactive Snap Sandbox**: A small embedded interactive playground where users can press `WASD` or Arrow keys on their keyboard to watch a custom green cursor snap to various buttons on the screen in real-time.
     *   **Tech Spec Grid**: Showcases the internal technical highlights (Low-Level Win32 Hooking, 100Hz refresh rate, zero-overhead Rust binary).
-    *   **Download CTA**: Large, glassmorphic download card showing `keysor-v0.1.0-win.exe` with a copy-pasteable PowerShell installation command: `iex (irm keysor.dev/install.ps1)`.
+    *   **Download CTA**: Large, glassmorphic download card showing `keysor-v0.1.0-win.exe` with a copy-pasteable PowerShell installation command: `iex (irm keysor.lepa7.com/install.ps1)`.
 
 ---
 

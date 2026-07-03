@@ -5,6 +5,7 @@ mod math;
 mod hook;
 mod platform;
 mod license;
+mod update;
 
 mod indicator;
 mod ui;
@@ -79,6 +80,9 @@ fn main() {
     }
     // 3-1. 14일 실시간 백그라운드 라이선스 만료 감지 스케줄러 시작
     license::start_license_verification_scheduler();
+
+    // 3-2. 백그라운드 업데이트 확인 서비스 가동
+    update::check_for_updates_async();
 
     // 4. 커서 시각 인디케이터 스레드 가동
     indicator::start_indicator();

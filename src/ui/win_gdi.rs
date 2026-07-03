@@ -1473,6 +1473,13 @@ unsafe extern "system" fn hud_wnd_proc(
                 let info_close = encode_wide(info_close_text);
                 let mut r_info_close = RECT { left: 30, top: 404, right: 778, bottom: 422 };
                 DrawTextW(hdc, info_close.as_ptr(), info_close.len() as i32 - 1, &mut r_info_close, 0);
+                
+                // Draw version text at the bottom-right corner
+                let version_str = format!("v{}", env!("CARGO_PKG_VERSION"));
+                let version_w = encode_wide(&version_str);
+                let mut r_version = RECT { left: 600, top: 404, right: 778, bottom: 422 };
+                SetTextColor(hdc, 0x666666); // Darker gray for subtle version label
+                DrawTextW(hdc, version_w.as_ptr(), version_w.len() as i32 - 1, &mut r_version, 2 | 32);
 
                 SelectObject(hdc, old_font_txt);
 
