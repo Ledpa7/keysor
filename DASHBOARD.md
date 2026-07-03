@@ -19,20 +19,25 @@
 
 ## 📅 최신 패치 및 수정 내역 (Latest Updates - 2026-07-03)
 
-- **[x] UAC 자동 관리자 권한(requireAdministrator) 연동**:
-  - `keysor.manifest` 파일을 신설하고 `keysor.rc`에 매니페스트 리소스를 바인딩하여, 프로그램 실행 시 자동으로 관리자 권한 UAC 승인을 획득하도록 설정했습니다.
-  - 이를 통해 관리자 권한으로 실행된 작업 관리자, 명령 프롬프트(CMD), 브라우저 등 시스템 보안 등급이 높은 창 위에서도 마우스 조작과 단축키 훅이 차단(UIPI 격리)되지 않고 100% 원활하게 동작하도록 안전성을 보완했습니다.
-- **[x] PowerShell 의존성을 100% 제거한 Win32 네이티브 입력 모달 구축**:
-  - 기존 닷넷 파워쉘 `InputBox`를 백그라운드 자식 프로세스로 호출하던 구조를 완전히 철폐했습니다. 이로 인해 타 PC 환경의 백신 사전 방역 솔루션이 파워쉘 구동을 악성 행위로 진단하여 입력창을 강제 차단하던 호환성 오류를 원천 차단했습니다.
-  - Win32 SDK 내장 컨트롤(`EDIT`, `BUTTON`, `STATIC` 등)들과 모달용 메시지 루프(`IsDialogMessageW`)를 직접 작성한 경량 네이티브 입력 대화창 모달을 구현하여 Keysor 바이너리 내에 이식했습니다.
-  - 라이선스 활성화 처리 결과(성공 및 오류 메시지)를 유저가 인지하기 좋도록 네이티브 `MessageBoxW`로 연결했습니다.
-- **[x] YAML 설정 로드 인코딩 오류 발생 시 시각적 경고 메시지박스 안내**:
-  - 메모장 등으로 주석을 편집하다 인코딩 형식을 UTF-8이 아닌 ANSI(CP949) 등으로 잘못 저장하여 `serde_yaml` 파싱 오류가 발생하는 경우, 단순 메모리 기본값 폴백에 그치지 않고 네이티브 `MessageBoxW` 경고 팝업을 띄우도록 보완했습니다.
-  - 이를 통해 사용자가 설정이 왜 기본값으로 초기화되었는지 직관적으로 에러 내용을 인지하고 조치할 수 있도록 개선했습니다.
-- **[x] 홈페이지 가독성 텍스트 튜닝 및 부제목 다국어 줄바꿈 정돈**:
-  - 홈페이지 내 Pro 에디션의 요금제 명칭을 기존 `프로 생산성 에디션`에서 보다 깔끔하고 직관적인 **`프로 에디션`**으로 축소 변경했습니다.
-  - 주요 성능 안내 피처 그리드의 타이틀을 `대각선 이동 속도 보정` -> **`대각선 속도 보정`**으로 다듬고, 설명 문구 또한 불필요한 수학 기호(`sqrt(2)`)를 제거한 깔끔한 설명 문장으로 단순화했습니다.
-  - 한국어(`ko`), 영어(`en`), 중국어(`zh`) 번역 딕셔너리 내부의 부제목 카테고리(`features_desc`, `hotkeys_desc`, `pricing_desc`)에 자연스러운 위치의 개행 태그(`<br>`)를 각각 삽입하여, 다국어 환경 전반의 가로 폭 대칭 밸런스와 가독성을 정돈하여 빌드 및 배포 완료했습니다.
+- **[x] GitHub Release API 연동 및 비동기 업데이트 검사 모듈 신설**:
+  - `src/update.rs` [NEW]: `ureq` 라이브러리를 사용해 GitHub 최신 Releases API(`https://api.github.com/repos/Ledpa7/keysor/releases/latest`)를 비동기로 호출하고, SemVer 정수(Major.Minor.Patch) 파싱 규칙에 기반해 로컬 버전과 대조하는 경량 모듈을 작성했습니다.
+  - 최신 버전이 감지되는 경우, 다른 HUD 창 뒤에 가려지지 않도록 최상단 최우선 순위(`MB_TOPMOST` 및 `MB_SETFOREGROUND`)를 적용한 네이티브 `MessageBoxW` 경고 팝업을 띄우며, 사용자가 '예'를 누르면 공식 다운로드 도메인(`https://www.keysor.lepa7.com`)으로 자동 웹 연결되도록 조치했습니다.
+  - `src/main.rs` [MODIFY]: 프로그램 초기 구동 단계에서 백그라운드 비동기 스레드로 `update::check_for_updates_async()`를 단 1회 안전하게 호출하도록 등록했습니다.
+- **[x] HUD 우측 하단 빌드 버전 정보 드로잉 표기**:
+  - `src/ui/win_gdi.rs` [MODIFY]: 마우스 모드가 켜질 때 나타나는 HUD 도움말 메인 윈도우의 우측 하단 구석에 현재 실행 중인 패키지의 빌드 시점 버전(예: `v1.0.0`)을 은은한 회색(`0x666666`) 폰트로 자연스럽게 드로잉하도록 GDI 렌더러를 보강했습니다.
+  - `Cargo.toml` 의 로컬 버전을 원격 버전과 동일하게 `1.0.0`으로 정식 동기화했습니다.
+- **[x] 독점 소스 및 저작권 침해 방지용 상용 EULA 라이선스(LICENSE) 도입**:
+  - 프로젝트 루트에 `LICENSE` [NEW]를 신설하여 Keysor Pro 유료 제품군의 무단 복제, 크랙 및 재배포를 법적으로 방어하는 EULA 조항을 상단 영문 전문, 하단 한국어 번역 대역 구조로 정밀하게 작성했습니다.
+- **[x] 단축키 가이드 테이블 3단에서 2단 컬럼 구조로 개편**:
+  - 홈페이지(`homepage/index.html`, `public/index.html`)의 단축키 매핑 안내 테이블의 레이아웃을 기존 3단(Operation Type, Default Keybinding, Description)에서 **`Operation & Keybinding`**과 **`Detailed Description`**의 **2단 구조**로 통합 리팩토링했습니다. 이로써 좁은 가로 스페이스 내에서도 시인성과 여백 밸런스를 대폭 개선했습니다.
+- **[x] 설명 문구(부제목) 가로폭 확장 및 영문 줄바꿈 3단 깨짐 버그 해결**:
+  - 웹 화면 내 부제목 및 타이틀 설명 단락(`features_desc`, `hotkeys_desc`, `pricing_desc`)들의 최대 가로폭 제한을 기존 `max-w-xl`에서 `max-w-3xl`로 넉넉히 확장해 주었습니다.
+  - 이를 통해 한글보다 텍스트 길이가 현저히 길어 가로폭 부족으로 인해 지저분하게 3줄(3단)로 찢어지며 접히던 영문 설명 문장들이 자동 줄바꿈 없이 개발자가 기재한 `<br>` 개행을 따라 단정하게 딱 **2줄(2단)**로 균일 정렬되도록 레이아웃 가독성을 최적화했습니다.
+- **[x] 버셀(Vercel) 리눅스 환경 대응용 Node.js 기반 크로스 플랫폼 빌드 파이프라인 개정**:
+  - `package.json` [MODIFY]: 기존 Windows 및 Linux OS 간 파일 복사 CLI 명령어 비호환성으로 인해 버셀 배포 시 명령어 오류(powershell / cp command not found)로 배포가 중단되던 현상을 해결했습니다.
+  - `copy-dist.js` [NEW]: 운영체제와 터미널 환경에 의존하지 않고 Node.js 빌트인 모듈로 빌드 아티팩트를 복사해 주는 크로스 플랫폼 파일 복사 헬퍼 스크립트를 작성하여 빌드 스크립트에 이식했습니다. 이로써 로컬 Windows 빌드 및 Vercel Linux 빌드 모두 에러 없이 100% 호환 배포를 달성했습니다.
+- **[x] 홈페이지 푸터(Footer) 계정명 오타 정정 및 새 탭 연동**:
+  - 홈페이지 하단 푸터 영역에 404 에러로 끊어져 있던 라이선스(License) 및 도큐멘테이션(Documentation) 깃허브 링크의 소유자 계정명을 기존 `ledpadev`에서 올바른 사용자 계정명인 **`Ledpa7`**로 일괄 수정하고, 클릭 시 기존 창이 닫히지 않고 새 창으로 띄우는 `target="_blank" rel="noopener noreferrer"` 보안 속성을 추가 완료했습니다.
 
 ## 📅 이전 패치 및 수정 내역 (Previous Updates - 2026-07-02)
 
@@ -223,7 +228,7 @@ graph TD
 
 ---
 
-## 📂 파일 및 디렉토리 구조 (File Directory)
+📂 파일 및 디렉토리 구조 (File Directory)
 
 모든 소스 코드는 아래 링크를 클릭하여 IDE에서 즉시 확인하실 수 있습니다.
 
@@ -232,16 +237,20 @@ graph TD
 ├── [Cargo.toml](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/Cargo.toml)                  # Rust 패키지 빌드 설정 및 Win32 피처 활성화
 ├── [build.rs](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/build.rs)                      # 리소스 자동 빌드 감지 및 컴파일러 지시자 설정
 ├── [keysor.rc](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/keysor.rc)                    # Windows 리소스 정보 지시 파일 (아이콘 ID 지정)
-├── [keysor.manifest](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/keysor.manifest)              # [NEW] 실행 시 UAC 관리자 권한 승인을 요구하는 매니페스트 기술서
+├── [keysor.manifest](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/keysor.manifest)              # 실행 시 UAC 관리자 권한 승인을 요구하는 매니페스트 기술서
 ├── [keysor.ico](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/keysor.ico)                   # 28% 라운드가 적용된 키서 공식 아이콘 (DIB 형식)
 ├── [keysor.yaml](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/keysor.yaml)                 # 사용자 커스텀 단축키 설정 템플릿 (초기 빌드용)
+├── [LICENSE](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/LICENSE)                     # [NEW] 저작권 보호 및 상용 사용 계약 조항을 명시한 EULA 문서
+├── [copy-dist.js](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/copy-dist.js)               # [NEW] 윈도우/리눅스 빌드 호환성을 대행하는 Node.js 기반 파일 복사 헬퍼
 ├── [DASHBOARD.md](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/DASHBOARD.md)               # 본 프로젝트 대시보드 문서
 ├── src/
 │   ├── [main.rs](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/src/main.rs)                 # 실시간 핫리로드 및 OS 클린 종료 연동
-│   ├── [math.rs](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/src/math.rs)                 # [NEW] 공통 마우스 이동 가속도 및 델타 연산 수학 모듈
+│   ├── [update.rs](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/src/update.rs)               # [NEW] GitHub API 비동기 업데이트 감지 및 팝업창 모듈
+│   ├── [math.rs](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/src/math.rs)                 # 공통 마우스 이동 가속도 및 델타 연산 수학 모듈
 │   ├── [config.rs](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/src/config.rs)             # 설정 폴더(.keysor) 자동 탐색/생성 안전 회로 탑재
 │   ├── [mouse.rs](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/src/mouse.rs)               # Win32 SendInput 연동 마우스 에뮬레이터 & DPI 자동 보정
 │   ├── [indicator.rs](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/src/indicator.rs)           # 작업표시줄 상주 및 시스템 메뉴 통합 제어
+│   ├── [ui/win_gdi.rs](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/src/ui/win_gdi.rs)         # HUD 드로잉 및 버전 정보 렌더링 GDI 로직
 │   └── [hook.rs](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/src/hook.rs)                 # 저수준 키보드 훅 & 100Hz 부드러운 가속 물리 스레드
 └── homepage/                                                                           # 키서 공식 소개 및 다운로드 홈페이지 (Vite + Tailwind v4)
     ├── [package.json](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/homepage/package.json)          # 웹 의존성 및 스크립트 설정
