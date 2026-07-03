@@ -2,14 +2,34 @@ Keysor End User License Agreement (EULA)
 
 Copyright (c) 2026 Ledpa7. All rights reserved.
 
-1. 사용권 제한 (License Restrictions)
-본 소프트웨어 및 모든 소스코드의 저작권과 지식재산권은 원저작권자(Ledpa7)에게 귀속됩니다. 저작권자의 서면 동의 없이 본 소프트웨어의 소스코드를 무단 복제, 수정, 배포, 대여, 재판매 또는 상업적 목적으로 이용하는 것을 엄격히 금지합니다.
+--------------------------------------------------------------------------------
+[ENGLISH]
+--------------------------------------------------------------------------------
 
-2. 유료 라이선스 (Pro Lifetime License)
-Keysor Pro 에디션의 모든 기능은 공식 채널(www.keysor.lepa7.com)을 통해 취득한 정식 라이선스 키를 보유한 구매자에 한하여 활성화 및 사용이 가능합니다. 비정상적인 방법으로 라이선스 활성화를 우회하거나 크랙하여 사용하는 행위는 법적인 처벌 대상이 될 수 있습니다.
+1. LICENSE GRANT AND RESTRICTIONS
+All copyrights, trademarks, and intellectual property rights in and to this software and its source code are owned by the original author (Ledpa7). Any unauthorized copying, distribution, modification, lease, resale, or commercial exploitation of this software and its source code without the prior written consent of the copyright owner is strictly prohibited.
 
-3. 보증 및 면책 한계 (Disclaimer of Warranty & Limitation of Liability)
-본 소프트웨어는 "있는 그대로(AS IS)" 제공되며, 명시적이거나 묵시적인 어떠한 형태의 품질 보증도 제공하지 않습니다. 저작권자는 본 소프트웨어의 사용 혹은 사용 불능으로 인해 발생한 모든 직간접적 손해(데이터 유실, 업무 중단, 컴퓨터 오작동 및 기타 금전적 손해를 포함하되 이에 국한되지 않음)에 대해 일체의 책임을 지지 않습니다.
+2. PRO LIFETIME LICENSE
+All premium features of Keysor Pro are only accessible and active for users holding a legitimate Pro license key acquired through the official channels (www.keysor.lepa7.com). Any attempt to bypass, crack, or disable the license validation mechanism is illegal and may be subject to severe legal consequences.
 
-4. 제3자 오픈소스 고지 (Third-Party Licenses)
-본 소프트웨어는 Rust 및 Rust 크레이트 생태계의 오픈소스 라이브러리를 포함하고 있으며, 해당 라이브러리들은 각각의 오픈소스 라이선스 규정(MIT, Apache 2.0 등)을 따릅니다.
+3. DISCLAIMER OF WARRANTY & LIMITATION OF LIABILITY
+This software is provided "AS IS" without warranty of any kind, either express or implied. The copyright owner shall not be liable for any direct, indirect, incidental, special, or consequential damages (including, but not limited to, loss of data, business interruption, computer malfunction, or other pecuniary loss) arising out of the use or inability to use this software.
+
+4. THIRD-PARTY COMPONENTS
+This software contains open-source libraries from Rust and its ecosystem, which are governed by their respective open-source licenses (e.g., MIT, Apache 2.0).
+
+--------------------------------------------------------------------------------
+[한국어 번역 / KOREAN TRANSLATION]
+--------------------------------------------------------------------------------
+
+1. 사용권 및 제한사항
+본 소프트웨어 및 모든 소스코드에 대한 저작권, 상표권 및 기타 지식재산권은 원저작권자(Ledpa7)에게 귀속됩니다. 저작권자의 사전 서면 동의 없이 본 소프트웨어 및 소스코드를 무단 복제, 수정, 배포, 대여, 재판매 또는 상업적으로 이용하는 것을 엄격히 금지합니다.
+
+2. Pro 평생 라이선스
+Keysor Pro 에디션의 모든 프리미엄 기능은 공식 채널(www.keysor.lepa7.com)을 통해 합법적으로 취득한 Pro 라이선스 키를 보유한 사용자만 이용할 수 있습니다. 라이선스 인증 메커니즘을 우회, 크랙 또는 무력화하려는 모든 시도는 위법이며 법적 처벌 대상이 될 수 있습니다.
+
+3. 보증 및 책임의 한계
+본 소프트웨어는 명시적이거나 묵시적인 어떠한 보증 없이 "있는 그대로(AS IS)" 제공됩니다. 저작권자는 본 소프트웨어의 사용 또는 사용 불능으로 인해 발생한 모든 직간접적 손해(데이터 유실, 업무 중단, 컴퓨터 오작동 또는 기타 금전적 손해를 포함하되 이에 국한되지 않음)에 대해 일체의 책임을 지지 않습니다.
+
+4. 제3자 오픈소스 고지
+본 소프트웨어는 Rust 및 그 생태계의 오픈소스 라이브러리를 포함하고 있으며, 해당 라이브러리들은 각각의 오픈소스 라이선스 규정(MIT, Apache 2.0 등)을 따릅니다.
