@@ -1943,6 +1943,24 @@ pub fn hide_indicator() {
 pub fn update_indicator_position() {
     if let Some(&hwnd) = INDICATOR_HWND.get() {
         unsafe {
+            // Re-show / restore if minimized or hidden by "Show Desktop" (Win+D)
+            let is_minimized = windows_sys::Win32::UI::WindowsAndMessaging::IsIconic(hwnd) != 0;
+            if is_minimized {
+                windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_RESTORE);
+            }
+
+            let mut is_visible = windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0;
+            if !is_visible {
+                windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNA);
+                is_visible = windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0;
+            }
+
+            if is_visible {
+                hide_system_cursor();
+            } else {
+                restore_system_cursor();
+            }
+
             let scale_lock = CLICK_SCALE.get_or_init(|| Mutex::new(1.0));
             let mut scale_changed_in_loop = false;
             if let Ok(mut scale) = scale_lock.lock() {
