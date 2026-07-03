@@ -3,6 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "npm install --prefix homepage && npm run build --prefix homepage && cp -r homepage/dist ./public"
+    "build": "npm install --prefix homepage && npm run build --prefix homepage && powershell -Command \"Copy-Item -Path 'homepage/dist/*' -Destination 'public' -Recurse -Force\""
   }
 }
