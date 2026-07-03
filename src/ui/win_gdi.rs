@@ -25,7 +25,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SWP_NOSIZE, SWP_NOACTIVATE, SetLayeredWindowAttributes, GetClientRect, GetSystemMetrics,
     WS_EX_APPWINDOW, WM_CLOSE, GetSystemMenu, AppendMenuW,
     MF_SEPARATOR, MF_STRING, WM_SYSCOMMAND, SW_MINIMIZE, WS_MINIMIZEBOX, WS_SYSMENU,
-    WM_ERASEBKGND, UpdateLayeredWindow, ULW_ALPHA, GetClassNameW, GetWindowRect
+    WM_ERASEBKGND, UpdateLayeredWindow, ULW_ALPHA, GetClassNameW, GetWindowRect,
+    WS_EX_TOOLWINDOW
 };
 
 pub static INDICATOR_HWND: OnceLock<HWND> = OnceLock::new();
@@ -1770,7 +1771,7 @@ pub fn start_indicator() {
 
         // 5. Create Indicator Window
         let hwnd = CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
             class_name_wide.as_ptr(),
             std::ptr::null(),
             WS_POPUP,
