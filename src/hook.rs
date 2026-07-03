@@ -922,6 +922,8 @@ pub fn cleanup_hook() {
     if let Some(hook) = KEYBOARD_HOOK.get() {
         hook.stop_listening();
     }
+    // Restore system cursor on exit if it was hidden
+    crate::ui::win_gdi::restore_system_cursor();
 }
 
 /// 포커스 전환 및 강제 상황 시 CapsLock 물리 눌림 상태를 확인하는 동기화 가드

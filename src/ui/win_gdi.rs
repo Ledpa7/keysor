@@ -1840,8 +1840,70 @@ pub fn start_indicator() {
     });
 }
 
+static mut HIDE_CURSOR_ACTIVE: bool = false;
+
+pub fn hide_system_cursor() {
+    unsafe {
+        if HIDE_CURSOR_ACTIVE {
+            return;
+        }
+
+        let and_mask: [u8; 128] = [0xFF; 128];
+        let xor_mask: [u8; 128] = [0x00; 128];
+
+        let cursor_ids = [
+            32512, // OCR_NORMAL
+            32513, // OCR_IBEAM
+            32514, // OCR_WAIT
+            32515, // OCR_CROSS
+            32516, // OCR_UP
+            32642, // OCR_SIZENWSE
+            32643, // OCR_SIZENESW
+            32644, // OCR_SIZEWE
+            32645, // OCR_SIZENS
+            32646, // OCR_SIZEALL
+            32648, // OCR_NO
+            32649, // OCR_HAND
+            32650, // OCR_APPSTARTING
+        ];
+
+        for &id in &cursor_ids {
+            let blank = windows_sys::Win32::UI::WindowsAndMessaging::CreateCursor(
+                0,
+                0,
+                0,
+                32,
+                32,
+                and_mask.as_ptr() as *const _,
+                xor_mask.as_ptr() as *const _,
+            );
+            if blank != 0 {
+                windows_sys::Win32::UI::WindowsAndMessaging::SetSystemCursor(blank, id);
+            }
+        }
+        HIDE_CURSOR_ACTIVE = true;
+    }
+}
+
+pub fn restore_system_cursor() {
+    unsafe {
+        if !HIDE_CURSOR_ACTIVE {
+            return;
+        }
+
+        windows_sys::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(
+            windows_sys::Win32::UI::WindowsAndMessaging::SPI_SETCURSORS,
+            0,
+            std::ptr::null_mut(),
+            windows_sys::Win32::UI::WindowsAndMessaging::SPIF_SENDCHANGE,
+        );
+        HIDE_CURSOR_ACTIVE = false;
+    }
+}
+
 pub fn show_indicator() {
     println!("[Debug] show_indicator() called");
+    hide_system_cursor();
     if let Some(&main_hwnd) = MAIN_HWND.get() {
         unsafe {
             windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(main_hwnd, SW_MINIMIZE);
@@ -1869,6 +1931,7 @@ pub fn show_indicator() {
 
 pub fn hide_indicator() {
     println!("[Debug] hide_indicator() called");
+    restore_system_cursor();
     if let Some(&hwnd) = INDICATOR_HWND.get() {
         unsafe {
             ShowWindow(hwnd, SW_HIDE);
