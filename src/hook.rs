@@ -775,7 +775,7 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
                 if state.win_pressed || state.alt_pressed {
                     crate::ui::win_gdi::SUSPEND_CURSOR_HIDE.store(true, Ordering::SeqCst);
                     unsafe {
-                        crate::ui::win_gdi::restore_system_cursor();
+                        crate::ui::win_gdi::force_restore_system_cursor();
                     }
                 }
             }

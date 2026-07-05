@@ -883,7 +883,7 @@ enum HudHitTarget {
     LicenseTop = 11,
 }
 
-fn classify_hit_target(x: i16, y: i16, features_enabled: bool) -> HudHitTarget {
+fn classify_hit_target(x: i16, y: i16, features_enabled: bool, is_pro: bool) -> HudHitTarget {
     if !features_enabled {
         if y >= 80 && y <= 344 && x >= 638 && x <= 778 {
             return HudHitTarget::ToggleMagnet;
@@ -900,7 +900,7 @@ fn classify_hit_target(x: i16, y: i16, features_enabled: bool) -> HudHitTarget {
         if x >= 662 && x <= 712 {
             return HudHitTarget::ToggleLanguage;
         } else if x >= 430 && x <= 540 {
-            if !features_enabled {
+            if !is_pro {
                 return HudHitTarget::BuyProTop;
             }
         } else if x >= 546 && x <= 656 {
@@ -1509,7 +1509,7 @@ unsafe extern "system" fn hud_wnd_proc(
                     })
                 };
                 let prev_hover = HUD_HOVER.load(Ordering::SeqCst);
-                let hit = classify_hit_target(x, y, is_pro || is_trial);
+                let hit = classify_hit_target(x, y, is_pro || is_trial, is_pro);
                 let new_hover = hit as u32;
                 
                 if new_hover != prev_hover {
@@ -1550,7 +1550,7 @@ unsafe extern "system" fn hud_wnd_proc(
                     state_arc.map_or(false, |arc| arc.lock().unwrap().config.settings.lang_en.unwrap_or(false))
                 };
                 
-                let hit = classify_hit_target(x, y, is_pro || is_trial);
+                let hit = classify_hit_target(x, y, is_pro || is_trial, is_pro);
                 match hit {
                     HudHitTarget::Minimize => {
                         if let Some(&main_hwnd) = MAIN_HWND.get() {
@@ -1898,6 +1898,13 @@ pub fn restore_system_cursor() {
             std::ptr::null_mut(),
             windows_sys::Win32::UI::WindowsAndMessaging::SPIF_SENDCHANGE,
         );
+
+        // 마우스 강제 갱신용 1픽셀 이동 Hack (기본 커서 즉시 렌더링 강제)
+        let mut pt = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
+        if windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt) != 0 {
+            windows_sys::Win32::UI::WindowsAndMessaging::SetCursorPos(pt.x, pt.y + 1);
+            windows_sys::Win32::UI::WindowsAndMessaging::SetCursorPos(pt.x, pt.y);
+        }
     }
 }
 
@@ -1910,6 +1917,13 @@ pub fn force_restore_system_cursor() {
             windows_sys::Win32::UI::WindowsAndMessaging::SPIF_SENDCHANGE | windows_sys::Win32::UI::WindowsAndMessaging::SPIF_UPDATEINIFILE,
         );
         HIDE_CURSOR_ACTIVE.store(false, Ordering::SeqCst);
+
+        // 마우스 강제 갱신용 1픽셀 이동 Hack (기본 커서 즉시 렌더링 강제)
+        let mut pt = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
+        if windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt) != 0 {
+            windows_sys::Win32::UI::WindowsAndMessaging::SetCursorPos(pt.x, pt.y + 1);
+            windows_sys::Win32::UI::WindowsAndMessaging::SetCursorPos(pt.x, pt.y);
+        }
     }
 }
 
@@ -1943,7 +1957,7 @@ pub fn show_indicator() {
 
 pub fn hide_indicator() {
     println!("[Debug] hide_indicator() called");
-    restore_system_cursor();
+    force_restore_system_cursor();
     if let Some(&hwnd) = INDICATOR_HWND.get() {
         unsafe {
             ShowWindow(hwnd, SW_HIDE);
@@ -1987,9 +2001,8 @@ unsafe fn get_process_name_from_window(hwnd: HWND) -> String {
     }
 }
 
-unsafe fn is_system_shell_foreground() -> bool {
+unsafe fn is_system_shell_foreground_with_info(hwnd: HWND, proc_name: &str, class_name: &str) -> bool {
     unsafe {
-        let hwnd = GetForegroundWindow();
         if hwnd == 0 {
             return true; // 포커스가 일시 유실되거나 UAC 창 등이 떴을 때는 시스템 커서를 안전하게 복원합니다.
         }
@@ -2004,24 +2017,23 @@ unsafe fn is_system_shell_foreground() -> bool {
             if hwnd == indicator_hwnd { return false; }
         }
 
-        let proc_name = get_process_name_from_window(hwnd);
         if proc_name.is_empty() {
             return false;
         }
 
         if proc_name == "explorer.exe" {
-            let mut class_name_buf = [0u16; 256];
-            let len = GetClassNameW(hwnd, class_name_buf.as_mut_ptr(), 256);
-            if len > 0 {
-                let class_name = String::from_utf16_lossy(&class_name_buf[..len as usize]);
-                if class_name == "XamlExplorerHostIslandWindow" || class_name == "ForegroundStaging" {
-                    return false;
-                }
+            // 오직 바탕화면(Progman, WorkerW)과 작업 표시줄(Shell_TrayWnd, SecondaryTrayWnd)만 쉘 포그라운드로 인정
+            if class_name == "Progman" 
+                || class_name == "WorkerW" 
+                || class_name == "Shell_TrayWnd" 
+                || class_name == "SecondaryTrayWnd" 
+            {
+                return true;
             }
+            return false;
         }
 
-        proc_name == "explorer.exe" 
-            || proc_name == "startmenuexperiencehost.exe" 
+        proc_name == "startmenuexperiencehost.exe" 
             || proc_name == "searchhost.exe" 
             || proc_name == "shellexperiencehost.exe" 
             || proc_name == "applicationframehost.exe"
@@ -2031,10 +2043,42 @@ unsafe fn is_system_shell_foreground() -> bool {
 pub fn update_indicator_position() {
     if let Some(&hwnd) = INDICATOR_HWND.get() {
         unsafe {
+            // 마우스 모드 안전성 검사 (비활성화 상태에서 타임 꼬임 방지)
+            let is_mouse_mode = if let Some(state_arc) = crate::hook::APP_STATE.get() {
+                if let Ok(state) = state_arc.try_lock() {
+                    state.is_mouse_mode
+                } else {
+                    true
+                }
+            } else {
+                true
+            };
+
+            if !is_mouse_mode {
+                force_restore_system_cursor();
+                if windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0 {
+                    windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE);
+                }
+                return;
+            }
+
             // Re-show / restore if minimized or hidden by "Show Desktop" (Win+D)
             let is_minimized = windows_sys::Win32::UI::WindowsAndMessaging::IsIconic(hwnd) != 0;
             if is_minimized {
                 windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_RESTORE);
+            }
+
+            // Foreground window 정보 단 1회 획득 (성능 병목 해결)
+            let fore_hwnd = GetForegroundWindow();
+            let mut proc_name = String::new();
+            let mut class_name = String::new();
+            if fore_hwnd != 0 {
+                proc_name = get_process_name_from_window(fore_hwnd);
+                let mut class_name_buf = [0u16; 256];
+                let len = GetClassNameW(fore_hwnd, class_name_buf.as_mut_ptr(), 256);
+                if len > 0 {
+                    class_name = String::from_utf16_lossy(&class_name_buf[..len as usize]);
+                }
             }
 
             let is_shortcut_active = if let Some(state_arc) = crate::hook::APP_STATE.get() {
@@ -2047,7 +2091,7 @@ pub fn update_indicator_position() {
                 false
             };
 
-            let is_shell_active = is_system_shell_foreground();
+            let is_shell_active = is_system_shell_foreground_with_info(fore_hwnd, &proc_name, &class_name);
             let is_hide_suspended = SUSPEND_CURSOR_HIDE.load(Ordering::SeqCst);
             let is_suspended = is_shortcut_active || is_shell_active || is_hide_suspended;
 
@@ -2056,16 +2100,6 @@ pub fn update_indicator_position() {
                 unsafe {
                     LOG_TICK = (LOG_TICK + 1) % 10;
                     if LOG_TICK == 0 {
-                        let fore_hwnd = GetForegroundWindow();
-                        let proc_name = get_process_name_from_window(fore_hwnd);
-                        let mut class_name_buf = [0u16; 256];
-                        let len = GetClassNameW(fore_hwnd, class_name_buf.as_mut_ptr(), 256);
-                        let class_name = if len > 0 {
-                            String::from_utf16_lossy(&class_name_buf[..len as usize])
-                        } else {
-                            "".to_string()
-                        };
-                        
                         if let Ok(mut file) = std::fs::OpenOptions::new()
                             .create(true)
                             .write(true)
@@ -2089,17 +2123,26 @@ pub fn update_indicator_position() {
                 is_visible = windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0;
             }
 
+            static mut PREV_SUSPENDED: bool = false;
+
             if is_visible && !is_suspended {
                 hide_system_cursor();
+                PREV_SUSPENDED = false;
             } else {
                 if is_suspended {
-                    static mut RESTORE_TICK: u32 = 0;
-                    RESTORE_TICK = (RESTORE_TICK + 1) % 10;
-                    if RESTORE_TICK == 0 {
+                    if !PREV_SUSPENDED {
                         force_restore_system_cursor();
+                    } else {
+                        static mut RESTORE_TICK: u32 = 0;
+                        RESTORE_TICK = (RESTORE_TICK + 1) % 10;
+                        if RESTORE_TICK == 0 {
+                            force_restore_system_cursor();
+                        }
                     }
+                    PREV_SUSPENDED = true;
                 } else {
                     restore_system_cursor();
+                    PREV_SUSPENDED = false;
                 }
 
                 if is_visible && is_suspended {
@@ -2208,6 +2251,7 @@ static CUR_INDICATOR_POS: OnceLock<Mutex<Option<(f64, f64)>>> = OnceLock::new();
 /// 마우스 조작 모드에서의 이동 상태(기본 속도, 이탈 여부, 이동 방향, 키 누름 경과 시간)를 획득합니다.
 fn get_movement_status() -> (f64, bool, Option<String>, std::time::Duration) {
     let mut base_speed = 1.0;
+    let mut current_speed = 1.0;
     let mut should_release = false;
     let mut new_dir = None;
     let mut hold_duration = std::time::Duration::from_secs(0);
@@ -2215,6 +2259,9 @@ fn get_movement_status() -> (f64, bool, Option<String>, std::time::Duration) {
     if let Some(state_arc) = crate::hook::APP_STATE.get() {
         let state = state_arc.lock().unwrap();
         base_speed = state.config.settings.base_speed;
+        let max_speed = state.config.settings.max_speed;
+        let acceleration = state.config.settings.acceleration;
+        
         if !state.active_movement_keys.is_empty() {
             should_release = true;
             for key in &state.active_movement_keys {
@@ -2235,9 +2282,13 @@ fn get_movement_status() -> (f64, bool, Option<String>, std::time::Duration) {
         if let Some(start) = state.movement_start_time {
             hold_duration = start.elapsed();
         }
+        
+        // 실시간 가속 속도 계산
+        let elapsed = hold_duration.as_secs_f64();
+        current_speed = crate::math::calculate_speed(base_speed, elapsed, acceleration, max_speed);
     }
     
-    (base_speed, should_release, new_dir, hold_duration)
+    (current_speed, should_release, new_dir, hold_duration)
 }
 
 /// 누른 시간(hold_duration)에 비례하여 동적 쿨다운 제한 시간(ms)을 반환합니다.
@@ -2444,7 +2495,14 @@ pub fn check_magnetic_snapping() {
                             *accum += step;
                         }
                         
-                        if *accum >= release_threshold {
+                        let mut dynamic_release_threshold = release_threshold;
+                        let hold_ms = hold_duration.as_millis();
+                        if hold_ms > 150 {
+                            let progress = ((hold_ms - 150) as f64 / 350.0).min(1.0);
+                            dynamic_release_threshold = release_threshold - (progress * (release_threshold - 4.0));
+                        }
+                        
+                        if *accum >= dynamic_release_threshold {
                             HUD_LAST_SNAPPED.store(0, std::sync::atomic::Ordering::SeqCst);
                             HUD_LANDED.store(false, std::sync::atomic::Ordering::SeqCst);
                             *accum = 0.0;
@@ -2869,8 +2927,15 @@ pub fn check_global_magnetic_snapping() {
                 *accum += step;
             }
             
-            if *accum >= release_threshold {
-                log_debug(&format!("Snapping released! accum={}, release_threshold={}", *accum, release_threshold));
+            let mut dynamic_release_threshold = release_threshold;
+            let hold_ms = hold_duration.as_millis();
+            if hold_ms > 150 {
+                let progress = ((hold_ms - 150) as f64 / 350.0).min(1.0);
+                dynamic_release_threshold = release_threshold - (progress * (release_threshold - 4.0));
+            }
+            
+            if *accum >= dynamic_release_threshold {
+                log_debug(&format!("Snapping released! accum={}, release_threshold={}", *accum, dynamic_release_threshold));
                 *last_pos = None;
                 *accum = 0.0;
                 
