@@ -2,6 +2,7 @@ use crate::config::{self, Config};
 use crate::platform::{get_system_controller, create_keyboard_hook, KeyboardHook, KeyEvent, HookResult};
 use std::collections::{HashSet, HashMap};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -675,6 +676,7 @@ fn process_movement_and_actions(
     // 일반 이동 및 보조 클릭 가로채기 매칭
     if let Some(action) = state.vk_bindings.get(&vk_code) {
         state.caps_lock_used_as_modifier = true;
+        crate::ui::win_gdi::SUSPEND_CURSOR_HIDE.store(false, Ordering::SeqCst);
 
         if is_keydown {
             if action.starts_with("MouseMove") {
@@ -745,6 +747,8 @@ fn is_allowed_pass_through_key(vk_code: u32) -> bool {
         0x70..=0x7B => true,
         // Scroll Lock (0x91)
         0x91 => true,
+        // 특수 키: , (0xBC), . (0xBE), / (0xBF), ; (0xBA), ' (0xDE), [ (0xDB), ] (0xDD)
+        0xBA | 0xBC | 0xBE | 0xBF | 0xDB | 0xDD | 0xDE => true,
         _ => false,
     }
 }
@@ -764,6 +768,26 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
             let mut state = state_arc.lock().unwrap();
             state.update_modifier_key_state(event.vk_code, event.is_keydown)
         };
+
+        // Win+Tab, Alt+Tab 단축키 시작 감지 및 강제 커서 복원
+        if event.vk_code == 0x09 && event.is_keydown {
+            if let Ok(state) = state_arc.try_lock() {
+                if state.win_pressed || state.alt_pressed {
+                    crate::ui::win_gdi::SUSPEND_CURSOR_HIDE.store(true, Ordering::SeqCst);
+                    unsafe {
+                        crate::ui::win_gdi::restore_system_cursor();
+                    }
+                }
+            }
+        }
+
+        // 일반 키 입력 시 화면 전환 일시정지 해제
+        if event.is_keydown && event.vk_code != 0x09 
+            && event.vk_code != 0x5B && event.vk_code != 0x5C 
+            && event.vk_code != 0x12 && event.vk_code != 0xA4 && event.vk_code != 0xA5
+            && event.vk_code != 0x11 && event.vk_code != 0xA2 && event.vk_code != 0xA3 {
+            crate::ui::win_gdi::SUSPEND_CURSOR_HIDE.store(false, Ordering::SeqCst);
+        }
 
         if is_modifier_key {
             return HookResult::Pass;

@@ -26,7 +26,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WS_EX_APPWINDOW, WM_CLOSE, GetSystemMenu, AppendMenuW,
     MF_SEPARATOR, MF_STRING, WM_SYSCOMMAND, SW_MINIMIZE, WS_MINIMIZEBOX, WS_SYSMENU,
     WM_ERASEBKGND, UpdateLayeredWindow, ULW_ALPHA, GetClassNameW, GetWindowRect,
-    WS_EX_TOOLWINDOW
+    WS_EX_TOOLWINDOW, GetForegroundWindow
 };
 
 pub static INDICATOR_HWND: OnceLock<HWND> = OnceLock::new();
@@ -38,6 +38,7 @@ pub static HUD_LAST_SNAPPED: AtomicU32 = AtomicU32::new(0);
 pub static SHOW_ALL_SENS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub static CLICK_SCALE: OnceLock<Mutex<f32>> = OnceLock::new();
 pub static IS_INPUTTING_LICENSE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static SUSPEND_CURSOR_HIDE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 use crate::ui::{KeysorUi, ClickType};
 
@@ -1841,14 +1842,14 @@ pub fn start_indicator() {
     });
 }
 
-static mut HIDE_CURSOR_ACTIVE: bool = false;
+static HIDE_CURSOR_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn hide_system_cursor() {
-    unsafe {
-        if HIDE_CURSOR_ACTIVE {
-            return;
-        }
+    if HIDE_CURSOR_ACTIVE.swap(true, Ordering::SeqCst) {
+        return;
+    }
 
+    unsafe {
         let and_mask: [u8; 128] = [0xFF; 128];
         let xor_mask: [u8; 128] = [0x00; 128];
 
@@ -1882,23 +1883,33 @@ pub fn hide_system_cursor() {
                 windows_sys::Win32::UI::WindowsAndMessaging::SetSystemCursor(blank, id);
             }
         }
-        HIDE_CURSOR_ACTIVE = true;
     }
 }
 
 pub fn restore_system_cursor() {
-    unsafe {
-        if !HIDE_CURSOR_ACTIVE {
-            return;
-        }
+    if !HIDE_CURSOR_ACTIVE.swap(false, Ordering::SeqCst) {
+        return;
+    }
 
+    unsafe {
         windows_sys::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(
             windows_sys::Win32::UI::WindowsAndMessaging::SPI_SETCURSORS,
             0,
             std::ptr::null_mut(),
             windows_sys::Win32::UI::WindowsAndMessaging::SPIF_SENDCHANGE,
         );
-        HIDE_CURSOR_ACTIVE = false;
+    }
+}
+
+pub fn force_restore_system_cursor() {
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(
+            windows_sys::Win32::UI::WindowsAndMessaging::SPI_SETCURSORS,
+            0,
+            std::ptr::null_mut(),
+            windows_sys::Win32::UI::WindowsAndMessaging::SPIF_SENDCHANGE | windows_sys::Win32::UI::WindowsAndMessaging::SPIF_UPDATEINIFILE,
+        );
+        HIDE_CURSOR_ACTIVE.store(false, Ordering::SeqCst);
     }
 }
 
@@ -1941,6 +1952,82 @@ pub fn hide_indicator() {
     clear_magnetic_snapping();
 }
 
+unsafe fn get_process_name_from_window(hwnd: HWND) -> String {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+    use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows_sys::Win32::Foundation::CloseHandle;
+
+    unsafe {
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid == 0 {
+            return "".to_string();
+        }
+
+        let process_handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process_handle == 0 {
+            return "".to_string();
+        }
+
+        let mut path_buf = [0u16; 1024];
+        let mut size = path_buf.len() as u32;
+        let success = QueryFullProcessImageNameW(process_handle, 0, path_buf.as_mut_ptr(), &mut size);
+        CloseHandle(process_handle);
+
+        if success != 0 && size > 0 {
+            let full_path = String::from_utf16_lossy(&path_buf[..size as usize]);
+            if let Some(pos) = full_path.rfind('\\') {
+                full_path[pos + 1..].to_lowercase()
+            } else {
+                full_path.to_lowercase()
+            }
+        } else {
+            "".to_string()
+        }
+    }
+}
+
+unsafe fn is_system_shell_foreground() -> bool {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd == 0 {
+            return true; // 포커스가 일시 유실되거나 UAC 창 등이 떴을 때는 시스템 커서를 안전하게 복원합니다.
+        }
+        
+        if let Some(&main_hwnd) = MAIN_HWND.get() {
+            if hwnd == main_hwnd { return false; }
+        }
+        if let Some(&hud_hwnd) = HUD_HWND.get() {
+            if hwnd == hud_hwnd { return false; }
+        }
+        if let Some(&indicator_hwnd) = INDICATOR_HWND.get() {
+            if hwnd == indicator_hwnd { return false; }
+        }
+
+        let proc_name = get_process_name_from_window(hwnd);
+        if proc_name.is_empty() {
+            return false;
+        }
+
+        if proc_name == "explorer.exe" {
+            let mut class_name_buf = [0u16; 256];
+            let len = GetClassNameW(hwnd, class_name_buf.as_mut_ptr(), 256);
+            if len > 0 {
+                let class_name = String::from_utf16_lossy(&class_name_buf[..len as usize]);
+                if class_name == "XamlExplorerHostIslandWindow" || class_name == "ForegroundStaging" {
+                    return false;
+                }
+            }
+        }
+
+        proc_name == "explorer.exe" 
+            || proc_name == "startmenuexperiencehost.exe" 
+            || proc_name == "searchhost.exe" 
+            || proc_name == "shellexperiencehost.exe" 
+            || proc_name == "applicationframehost.exe"
+    }
+}
+
 pub fn update_indicator_position() {
     if let Some(&hwnd) = INDICATOR_HWND.get() {
         unsafe {
@@ -1950,16 +2037,74 @@ pub fn update_indicator_position() {
                 windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_RESTORE);
             }
 
+            let is_shortcut_active = if let Some(state_arc) = crate::hook::APP_STATE.get() {
+                if let Ok(state) = state_arc.try_lock() {
+                    state.is_system_shortcut_active()
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            let is_shell_active = is_system_shell_foreground();
+            let is_hide_suspended = SUSPEND_CURSOR_HIDE.load(Ordering::SeqCst);
+            let is_suspended = is_shortcut_active || is_shell_active || is_hide_suspended;
+
+            {
+                static mut LOG_TICK: u32 = 0;
+                unsafe {
+                    LOG_TICK = (LOG_TICK + 1) % 10;
+                    if LOG_TICK == 0 {
+                        let fore_hwnd = GetForegroundWindow();
+                        let proc_name = get_process_name_from_window(fore_hwnd);
+                        let mut class_name_buf = [0u16; 256];
+                        let len = GetClassNameW(fore_hwnd, class_name_buf.as_mut_ptr(), 256);
+                        let class_name = if len > 0 {
+                            String::from_utf16_lossy(&class_name_buf[..len as usize])
+                        } else {
+                            "".to_string()
+                        };
+                        
+                        if let Ok(mut file) = std::fs::OpenOptions::new()
+                            .create(true)
+                            .write(true)
+                            .append(true)
+                            .open("C:\\Users\\wjdwl\\.gemini\\antigravity\\scratch\\14-Keysor\\debug_cursor.txt")
+                        {
+                            use std::io::Write;
+                            let _ = writeln!(
+                                file,
+                                "[Debug] ForeHwnd: 0x{:X}, Proc: {}, Class: {}, is_suspended: {}, is_shortcut: {}, is_shell: {}, is_hide_sus: {}", 
+                                fore_hwnd as usize, proc_name, class_name, is_suspended, is_shortcut_active, is_shell_active, is_hide_suspended
+                            );
+                        }
+                    }
+                }
+            }
+
             let mut is_visible = windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0;
-            if !is_visible {
+            if !is_visible && !is_suspended {
                 windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNA);
                 is_visible = windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0;
             }
 
-            if is_visible {
+            if is_visible && !is_suspended {
                 hide_system_cursor();
             } else {
-                restore_system_cursor();
+                if is_suspended {
+                    static mut RESTORE_TICK: u32 = 0;
+                    RESTORE_TICK = (RESTORE_TICK + 1) % 10;
+                    if RESTORE_TICK == 0 {
+                        force_restore_system_cursor();
+                    }
+                } else {
+                    restore_system_cursor();
+                }
+
+                if is_visible && is_suspended {
+                    windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE);
+                }
             }
 
             let scale_lock = CLICK_SCALE.get_or_init(|| Mutex::new(1.0));
