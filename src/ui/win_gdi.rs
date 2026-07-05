@@ -2028,6 +2028,14 @@ unsafe fn is_system_shell_foreground_with_info(hwnd: HWND, proc_name: &str, clas
                 || class_name == "Shell_TrayWnd" 
                 || class_name == "SecondaryTrayWnd" 
             {
+                // Keysor가 마우스 모드 중이라면 쉘 윈도우 포그라운드로 인해 커서가 숨겨지지 않도록 함
+                if let Some(state_arc) = crate::hook::APP_STATE.get() {
+                    if let Ok(state) = state_arc.try_lock() {
+                        if state.is_mouse_mode {
+                            return false;
+                        }
+                    }
+                }
                 return true;
             }
             return false;
@@ -2040,16 +2048,156 @@ unsafe fn is_system_shell_foreground_with_info(hwnd: HWND, proc_name: &str, clas
     }
 }
 
+fn get_foreground_window_info(fore_hwnd: HWND) -> (String, String) {
+    let mut proc_name = String::new();
+    let mut class_name = String::new();
+    if fore_hwnd != 0 {
+        unsafe {
+            proc_name = get_process_name_from_window(fore_hwnd);
+            let mut class_name_buf = [0u16; 256];
+            let len = GetClassNameW(fore_hwnd, class_name_buf.as_mut_ptr(), 256);
+            if len > 0 {
+                class_name = String::from_utf16_lossy(&class_name_buf[..len as usize]);
+            }
+        }
+    }
+    (proc_name, class_name)
+}
+
+fn write_debug_log(
+    fore_hwnd: HWND,
+    proc_name: &str,
+    class_name: &str,
+    is_suspended: bool,
+    is_shortcut_active: bool,
+    is_shell_active: bool,
+    is_hide_suspended: bool,
+) {
+    unsafe {
+        static mut LOG_TICK: u32 = 0;
+        LOG_TICK = (LOG_TICK + 1) % 10;
+        if LOG_TICK == 0 {
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .append(true)
+                .open("C:\\Users\\wjdwl\\.gemini\\antigravity\\scratch\\14-Keysor\\debug_cursor.txt")
+            {
+                use std::io::Write;
+                let _ = writeln!(
+                    file,
+                    "[Debug] ForeHwnd: 0x{:X}, Proc: {}, Class: {}, is_suspended: {}, is_shortcut: {}, is_shell: {}, is_hide_sus: {}", 
+                    fore_hwnd as usize, proc_name, class_name, is_suspended, is_shortcut_active, is_shell_active, is_hide_suspended
+                );
+            }
+        }
+    }
+}
+
+fn handle_cursor_visibility(hwnd: HWND, is_suspended: bool, is_visible: &mut bool) {
+    unsafe {
+        if !*is_visible && !is_suspended {
+            windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNA);
+            *is_visible = windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0;
+        }
+
+        static mut PREV_SUSPENDED: bool = false;
+
+        if *is_visible && !is_suspended {
+            hide_system_cursor();
+            PREV_SUSPENDED = false;
+        } else {
+            if is_suspended {
+                if !PREV_SUSPENDED {
+                    force_restore_system_cursor();
+                } else {
+                    static mut RESTORE_TICK: u32 = 0;
+                    RESTORE_TICK = (RESTORE_TICK + 1) % 10;
+                    if RESTORE_TICK == 0 {
+                        force_restore_system_cursor();
+                    }
+                }
+                PREV_SUSPENDED = true;
+            } else {
+                restore_system_cursor();
+                PREV_SUSPENDED = false;
+            }
+
+            if *is_visible && is_suspended {
+                windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE);
+            }
+        }
+    }
+}
+
+fn update_click_scale() -> bool {
+    let scale_lock = CLICK_SCALE.get_or_init(|| Mutex::new(1.0));
+    let mut scale_changed = false;
+    if let Ok(mut scale) = scale_lock.lock() {
+        if *scale < 1.0 {
+            *scale += 0.05;
+            if *scale > 1.0 {
+                *scale = 1.0;
+                let type_lock = CLICK_TYPE.get_or_init(|| Mutex::new(ClickType::None));
+                if let Ok(mut t) = type_lock.lock() {
+                    *t = ClickType::None;
+                }
+            }
+            scale_changed = true;
+        }
+    }
+    scale_changed
+}
+
+fn calculate_interpolated_pos() -> (f64, f64) {
+    let mut pt = POINT { x: 0, y: 0 };
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt);
+    }
+    
+    let target_x = (pt.x - 16) as f64;
+    let target_y = (pt.y - 16) as f64;
+    
+    let pos_lock = CUR_INDICATOR_POS.get_or_init(|| Mutex::new(None));
+    let mut pos = pos_lock.lock().unwrap();
+    
+    let (next_x, next_y) = match *pos {
+        Some((cx, cy)) => {
+            let lerp_factor = 0.35;
+            let nx = cx + (target_x - cx) * lerp_factor;
+            let ny = cy + (target_y - cy) * lerp_factor;
+            (nx, ny)
+        }
+        None => {
+            (target_x, target_y)
+        }
+    };
+    
+    *pos = Some((next_x, next_y));
+    (next_x, next_y)
+}
+
+fn check_state_changed(is_dragging: bool, is_scrolling: bool, is_snapped: bool) -> bool {
+    static LAST_INDICATOR_STATE: OnceLock<Mutex<(bool, bool, bool)>> = OnceLock::new();
+    let last_state_lock = LAST_INDICATOR_STATE.get_or_init(|| Mutex::new((false, false, false)));
+    if let Ok(mut last_state) = last_state_lock.lock() {
+        if *last_state != (is_dragging, is_scrolling, is_snapped) {
+            *last_state = (is_dragging, is_scrolling, is_snapped);
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    }
+}
+
 pub fn update_indicator_position() {
     if let Some(&hwnd) = INDICATOR_HWND.get() {
         unsafe {
-            // 마우스 모드 안전성 검사 (비활성화 상태에서 타임 꼬임 방지)
+            // 1. 마우스 모드 안전성 검사 (비활성화 상태에서 타임 꼬임 방지)
             let is_mouse_mode = if let Some(state_arc) = crate::hook::APP_STATE.get() {
-                if let Ok(state) = state_arc.try_lock() {
-                    state.is_mouse_mode
-                } else {
-                    true
-                }
+                state_arc.try_lock().map(|s| s.is_mouse_mode).unwrap_or(true)
             } else {
                 true
             };
@@ -2062,163 +2210,54 @@ pub fn update_indicator_position() {
                 return;
             }
 
-            // Re-show / restore if minimized or hidden by "Show Desktop" (Win+D)
+            // 2. 최소화 상태 복구
             let is_minimized = windows_sys::Win32::UI::WindowsAndMessaging::IsIconic(hwnd) != 0;
             if is_minimized {
                 windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_RESTORE);
             }
 
-            // Foreground window 정보 단 1회 획득 (성능 병목 해결)
+            // 3. Foreground window 정보 획득 및 서스펜드 상태 연산
             let fore_hwnd = GetForegroundWindow();
-            let mut proc_name = String::new();
-            let mut class_name = String::new();
-            if fore_hwnd != 0 {
-                proc_name = get_process_name_from_window(fore_hwnd);
-                let mut class_name_buf = [0u16; 256];
-                let len = GetClassNameW(fore_hwnd, class_name_buf.as_mut_ptr(), 256);
-                if len > 0 {
-                    class_name = String::from_utf16_lossy(&class_name_buf[..len as usize]);
-                }
-            }
+            let (proc_name, class_name) = get_foreground_window_info(fore_hwnd);
 
-            let is_shortcut_active = if let Some(state_arc) = crate::hook::APP_STATE.get() {
-                if let Ok(state) = state_arc.try_lock() {
-                    state.is_system_shortcut_active()
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
+            let is_shortcut_active = crate::hook::APP_STATE.get()
+                .and_then(|arc| arc.try_lock().ok())
+                .map(|s| s.is_system_shortcut_active())
+                .unwrap_or(false);
 
             let is_shell_active = is_system_shell_foreground_with_info(fore_hwnd, &proc_name, &class_name);
             let is_hide_suspended = SUSPEND_CURSOR_HIDE.load(Ordering::SeqCst);
             let is_suspended = is_shortcut_active || is_shell_active || is_hide_suspended;
 
-            {
-                static mut LOG_TICK: u32 = 0;
-                unsafe {
-                    LOG_TICK = (LOG_TICK + 1) % 10;
-                    if LOG_TICK == 0 {
-                        if let Ok(mut file) = std::fs::OpenOptions::new()
-                            .create(true)
-                            .write(true)
-                            .append(true)
-                            .open("C:\\Users\\wjdwl\\.gemini\\antigravity\\scratch\\14-Keysor\\debug_cursor.txt")
-                        {
-                            use std::io::Write;
-                            let _ = writeln!(
-                                file,
-                                "[Debug] ForeHwnd: 0x{:X}, Proc: {}, Class: {}, is_suspended: {}, is_shortcut: {}, is_shell: {}, is_hide_sus: {}", 
-                                fore_hwnd as usize, proc_name, class_name, is_suspended, is_shortcut_active, is_shell_active, is_hide_suspended
-                            );
-                        }
-                    }
-                }
-            }
+            // 4. 디버그 로그 기록
+            write_debug_log(fore_hwnd, &proc_name, &class_name, is_suspended, is_shortcut_active, is_shell_active, is_hide_suspended);
 
+            // 5. 창 가시성 및 시스템 커서 토글 처리
             let mut is_visible = windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0;
-            if !is_visible && !is_suspended {
-                windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNA);
-                is_visible = windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0;
-            }
+            handle_cursor_visibility(hwnd, is_suspended, &mut is_visible);
 
-            static mut PREV_SUSPENDED: bool = false;
+            // 6. 클릭 스케일 복구 애니메이션 처리
+            let scale_changed_in_loop = update_click_scale();
 
-            if is_visible && !is_suspended {
-                hide_system_cursor();
-                PREV_SUSPENDED = false;
-            } else {
-                if is_suspended {
-                    if !PREV_SUSPENDED {
-                        force_restore_system_cursor();
-                    } else {
-                        static mut RESTORE_TICK: u32 = 0;
-                        RESTORE_TICK = (RESTORE_TICK + 1) % 10;
-                        if RESTORE_TICK == 0 {
-                            force_restore_system_cursor();
-                        }
-                    }
-                    PREV_SUSPENDED = true;
-                } else {
-                    restore_system_cursor();
-                    PREV_SUSPENDED = false;
-                }
+            // 7. 슬라이딩 보간 좌표 산출
+            let (next_x, next_y) = calculate_interpolated_pos();
 
-                if is_visible && is_suspended {
-                    windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE);
-                }
-            }
-
-            let scale_lock = CLICK_SCALE.get_or_init(|| Mutex::new(1.0));
-            let mut scale_changed_in_loop = false;
-            if let Ok(mut scale) = scale_lock.lock() {
-                if *scale < 1.0 {
-                    *scale += 0.05; // 복구량 (10ms마다 0.05씩 증가하므로 정확히 100ms(0.1초)만에 1.0 복귀)
-                    if *scale > 1.0 {
-                        *scale = 1.0;
-                        let type_lock = CLICK_TYPE.get_or_init(|| Mutex::new(ClickType::None));
-                        if let Ok(mut t) = type_lock.lock() {
-                            *t = ClickType::None;
-                        }
-                    }
-                    scale_changed_in_loop = true;
-                }
-            }
-
-            let mut pt = POINT { x: 0, y: 0 };
-            windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt);
-            
-            let target_x = (pt.x - 16) as f64;
-            let target_y = (pt.y - 16) as f64;
-            
-            let pos_lock = CUR_INDICATOR_POS.get_or_init(|| Mutex::new(None));
-            let mut pos = pos_lock.lock().unwrap();
-            
-            let (next_x, next_y) = match *pos {
-                Some((cx, cy)) => {
-                    // 보간 팩터 0.35 적용 (시각적 부드러운 슬라이딩 궤적 연출)
-                    let lerp_factor = 0.35;
-                    let nx = cx + (target_x - cx) * lerp_factor;
-                    let ny = cy + (target_y - cy) * lerp_factor;
-                    (nx, ny)
-                }
-                None => {
-                    (target_x, target_y)
-                }
-            };
-            
-            *pos = Some((next_x, next_y));
-            
-            static LAST_INDICATOR_STATE: OnceLock<Mutex<(bool, bool, bool)>> = OnceLock::new();
+            // 8. 드래그, 스크롤, 스냅 상태 획득
             let (is_dragging, is_scrolling, is_snapped) = if let Some(state_arc) = crate::hook::APP_STATE.get() {
-                if let Ok(state) = state_arc.try_lock() {
-                    (state.is_dragging, !state.active_scroll_keys.is_empty(), is_currently_snapped())
-                } else {
-                    (false, false, false)
-                }
+                state_arc.try_lock().map(|s| {
+                    (s.is_dragging, !s.active_scroll_keys.is_empty(), is_currently_snapped())
+                }).unwrap_or((false, false, false))
             } else {
                 (false, false, false)
             };
 
-            let state_changed = {
-                let last_state_lock = LAST_INDICATOR_STATE.get_or_init(|| Mutex::new((false, false, false)));
-                if let Ok(mut last_state) = last_state_lock.lock() {
-                    if *last_state != (is_dragging, is_scrolling, is_snapped) {
-                        *last_state = (is_dragging, is_scrolling, is_snapped);
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            };
-
+            // 9. 상태/스케일 변경 감지 시 레이어드 이미지 즉시 갱신
+            let state_changed = check_state_changed(is_dragging, is_scrolling, is_snapped);
             if state_changed || scale_changed_in_loop {
                 update_indicator_layered_image(hwnd);
             }
 
+            // 10. 최종 윈도우 위치 동기화 및 강제 드로우
             SetWindowPos(
                 hwnd,
                 HWND_TOPMOST,
@@ -3026,7 +3065,7 @@ pub fn check_global_magnetic_snapping() {
                 let dx_cooldown = tx - ex;
                 let dy_cooldown = ty - ey;
                 let dist_cooldown = ((dx_cooldown * dx_cooldown + dy_cooldown * dy_cooldown) as f64).sqrt();
-                if dist_cooldown < 10.0 && escaped_time.elapsed() < std::time::Duration::from_millis(200) {
+                if dist_cooldown < 35.0 && escaped_time.elapsed() < std::time::Duration::from_millis(350) {
                     continue;
                 }
             }
