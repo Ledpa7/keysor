@@ -2073,6 +2073,7 @@ fn write_debug_log(
     is_shell_active: bool,
     is_hide_suspended: bool,
 ) {
+    #[cfg(debug_assertions)]
     unsafe {
         static mut LOG_TICK: u32 = 0;
         LOG_TICK = (LOG_TICK + 1) % 10;
@@ -2218,7 +2219,35 @@ pub fn update_indicator_position() {
 
             // 3. Foreground window 정보 획득 및 서스펜드 상태 연산
             let fore_hwnd = GetForegroundWindow();
-            let (proc_name, class_name) = get_foreground_window_info(fore_hwnd);
+            
+            static LAST_FORE_HWND: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            static CACHED_PROC: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+            static CACHED_CLASS: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+
+            let last_hwnd = LAST_FORE_HWND.load(std::sync::atomic::Ordering::SeqCst) as HWND;
+            let (proc_name, class_name) = if fore_hwnd == last_hwnd {
+                let proc_lock = CACHED_PROC.get_or_init(|| Mutex::new(None));
+                let class_lock = CACHED_CLASS.get_or_init(|| Mutex::new(None));
+                let p = proc_lock.lock().unwrap().clone();
+                let c = class_lock.lock().unwrap().clone();
+                if p.is_some() && c.is_some() {
+                    (p.unwrap(), c.unwrap())
+                } else {
+                    let (p_new, c_new) = get_foreground_window_info(fore_hwnd);
+                    *proc_lock.lock().unwrap() = Some(p_new.clone());
+                    *class_lock.lock().unwrap() = Some(c_new.clone());
+                    LAST_FORE_HWND.store(fore_hwnd as usize, std::sync::atomic::Ordering::SeqCst);
+                    (p_new, c_new)
+                }
+            } else {
+                let (p_new, c_new) = get_foreground_window_info(fore_hwnd);
+                let proc_lock = CACHED_PROC.get_or_init(|| Mutex::new(None));
+                let class_lock = CACHED_CLASS.get_or_init(|| Mutex::new(None));
+                *proc_lock.lock().unwrap() = Some(p_new.clone());
+                *class_lock.lock().unwrap() = Some(c_new.clone());
+                LAST_FORE_HWND.store(fore_hwnd as usize, std::sync::atomic::Ordering::SeqCst);
+                (p_new, c_new)
+            };
 
             let is_shortcut_active = crate::hook::APP_STATE.get()
                 .and_then(|arc| arc.try_lock().ok())
