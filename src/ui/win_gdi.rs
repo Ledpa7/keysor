@@ -1679,101 +1679,7 @@ pub unsafe fn set_window_band_safe(hwnd: HWND, band: u32) -> bool {
     }
     false
 }
-pub unsafe fn create_keysor_cursor() -> windows_sys::Win32::UI::WindowsAndMessaging::HCURSOR {
-    use windows_sys::Win32::Graphics::Gdi::*;
-    use windows_sys::Win32::Graphics::GdiPlus::*;
-    use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-    let size = 32i32;
-    let hdc_screen = GetDC(0);
-    let hdc_color = CreateCompatibleDC(hdc_screen);
-    let hdc_mask = CreateCompatibleDC(hdc_screen);
-
-    // 32bpp 컬러 비트맵 (알파 블렌딩)
-    let mut bmi: BITMAPINFO = std::mem::zeroed();
-    bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
-    bmi.bmiHeader.biWidth = size;
-    bmi.bmiHeader.biHeight = -size;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    let mut bits_color: *mut std::ffi::c_void = std::ptr::null_mut();
-    let hbm_color = CreateDIBSection(hdc_color, &bmi, DIB_RGB_COLORS, &mut bits_color, 0, 0);
-
-    // 1bpp 모노크롬 마스크 비트맵 (전부 흰색 = 컬러 비트맵의 알파로 결정)
-    let hbm_mask = CreateBitmap(size, size, 1, 1, std::ptr::null());
-
-    if hbm_color == 0 || hbm_mask == 0 || bits_color.is_null() {
-        if hbm_color != 0 { DeleteObject(hbm_color); }
-        if hbm_mask != 0 { DeleteObject(hbm_mask); }
-        DeleteDC(hdc_color);
-        DeleteDC(hdc_mask);
-        ReleaseDC(0, hdc_screen);
-        return 0;
-    }
-
-    let old_color = SelectObject(hdc_color, hbm_color);
-
-    // 전체 투명으로 초기화 (alpha = 0)
-    std::ptr::write_bytes(bits_color, 0, (size * size * 4) as usize);
-
-    // GDI+로 에메랄드 K 심볼 그리기
-    let mut graphics = std::ptr::null_mut();
-    if GdipCreateFromHDC(hdc_color, &mut graphics) == 0 {
-        GdipSetSmoothingMode(graphics, SmoothingModeAntiAlias);
-
-        // 검은 외곽선 (4px)
-        let mut black_pen = std::ptr::null_mut();
-        if GdipCreatePen1(0xFF000000u32, 4.0, 2, &mut black_pen) == 0 {
-            GdipSetPenStartCap(black_pen, 2);
-            GdipSetPenEndCap(black_pen, 2);
-            GdipSetPenLineJoin(black_pen, 2);
-            GdipDrawLineI(graphics, black_pen, 8, 4, 8, 28);
-            GdipDrawLineI(graphics, black_pen, 8, 16, 24, 4);
-            GdipDrawLineI(graphics, black_pen, 8, 16, 24, 28);
-            GdipDeletePen(black_pen);
-        }
-
-        // 에메랄드 그라디언트 채우기 (2.5px)
-        let p1 = PointF { X: 8.0, Y: 4.0 };
-        let p2 = PointF { X: 24.0, Y: 28.0 };
-        let mut brush = std::ptr::null_mut();
-        if GdipCreateLineBrush(&p1, &p2, 0xFF2FFFAD_u32, 0xFF00C853_u32, 0, &mut brush) == 0 {
-            let mut grad_pen = std::ptr::null_mut();
-            if GdipCreatePen2(brush, 2.5, 2, &mut grad_pen) == 0 {
-                GdipSetPenStartCap(grad_pen, 2);
-                GdipSetPenEndCap(grad_pen, 2);
-                GdipSetPenLineJoin(grad_pen, 2);
-                GdipDrawLineI(graphics, grad_pen, 8, 4, 8, 28);
-                GdipDrawLineI(graphics, grad_pen, 8, 16, 24, 4);
-                GdipDrawLineI(graphics, grad_pen, 8, 16, 24, 28);
-                GdipDeletePen(grad_pen);
-            }
-            GdipDeleteBrush(brush);
-        }
-
-        GdipDeleteGraphics(graphics);
-    }
-
-    SelectObject(hdc_color, old_color);
-    DeleteDC(hdc_color);
-    DeleteDC(hdc_mask);
-    ReleaseDC(0, hdc_screen);
-
-    let info = ICONINFO {
-        fIcon: 0,
-        xHotspot: 8,
-        yHotspot: 8,
-        hbmMask: hbm_mask,
-        hbmColor: hbm_color,
-    };
-
-    let hcursor = CreateIconIndirect(&info);
-    DeleteObject(hbm_color);
-    DeleteObject(hbm_mask);
-    hcursor
-}
 
 
 pub fn start_indicator() {
@@ -2295,6 +2201,102 @@ fn check_state_changed(is_dragging: bool, is_scrolling: bool, is_snapped: bool) 
     }
 }
 
+/// 실제 물리 키 상태를 스캔하여 락(Lock)이 걸린 모디파이어 키 상태 동기화
+fn check_and_sync_physical_modifiers(is_shortcut_active: &mut bool) {
+    if *is_shortcut_active {
+        unsafe {
+            let ctrl_down = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x11) as u32 & 0x8000) != 0;
+            let menu_down = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x12) as u32 & 0x8000) != 0;
+            let lwin_down = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x5B) as u32 & 0x8000) != 0;
+            let rwin_down = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x5C) as u32 & 0x8000) != 0;
+            if !ctrl_down && !menu_down && !lwin_down && !rwin_down {
+                *is_shortcut_active = false;
+                if let Some(state_arc) = crate::hook::APP_STATE.get() {
+                    if let Ok(mut state) = state_arc.try_lock() {
+                        state.ctrl_pressed = false;
+                        state.alt_pressed = false;
+                        state.win_pressed = false;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 포그라운드 윈도우 정보를 기준으로 서스펜드(일시정지) 판단
+fn resolve_foreground_suspend_state(fore_hwnd: HWND, is_shortcut_active: bool) -> (String, String, bool) {
+    static LAST_FORE_HWND: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static CACHED_PROC: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    static CACHED_CLASS: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+
+    let last_hwnd = LAST_FORE_HWND.load(std::sync::atomic::Ordering::SeqCst) as HWND;
+    let (proc_name, class_name) = if fore_hwnd == last_hwnd {
+        let proc_lock = CACHED_PROC.get_or_init(|| Mutex::new(None));
+        let class_lock = CACHED_CLASS.get_or_init(|| Mutex::new(None));
+        let p = proc_lock.lock().unwrap().clone();
+        let c = class_lock.lock().unwrap().clone();
+        if p.is_some() && c.is_some() {
+            (p.unwrap(), c.unwrap())
+        } else {
+            let (p_new, c_new) = unsafe { get_foreground_window_info(fore_hwnd) };
+            *proc_lock.lock().unwrap() = Some(p_new.clone());
+            *class_lock.lock().unwrap() = Some(c_new.clone());
+            LAST_FORE_HWND.store(fore_hwnd as usize, std::sync::atomic::Ordering::SeqCst);
+            (p_new, c_new)
+        }
+    } else {
+        let (p_new, c_new) = unsafe { get_foreground_window_info(fore_hwnd) };
+        let proc_lock = CACHED_PROC.get_or_init(|| Mutex::new(None));
+        let class_lock = CACHED_CLASS.get_or_init(|| Mutex::new(None));
+        *proc_lock.lock().unwrap() = Some(p_new.clone());
+        *class_lock.lock().unwrap() = Some(c_new.clone());
+        LAST_FORE_HWND.store(fore_hwnd as usize, std::sync::atomic::Ordering::SeqCst);
+        (p_new, c_new)
+    };
+
+    let is_shell_active = unsafe { is_system_shell_foreground_with_info(fore_hwnd, &proc_name, &class_name) };
+    let is_hide_suspended = SUSPEND_CURSOR_HIDE.load(Ordering::SeqCst);
+    let is_suspended = is_shortcut_active || is_shell_active || is_hide_suspended;
+
+    unsafe {
+        write_debug_log(fore_hwnd, &proc_name, &class_name, is_suspended, is_shortcut_active, is_shell_active, is_hide_suspended);
+    }
+
+    (proc_name, class_name, is_suspended)
+}
+
+/// 인디케이터 오버레이 창의 위치 및 렌더링 상태 동기화
+fn update_overlay_window_position(hwnd: HWND, scale_changed_in_loop: bool) {
+    let (next_x, next_y) = calculate_interpolated_pos();
+
+    let (is_dragging, is_scrolling, is_snapped) = if let Some(state_arc) = crate::hook::APP_STATE.get() {
+        state_arc.try_lock().map(|s| {
+            (s.is_dragging, !s.active_scroll_keys.is_empty(), is_currently_snapped())
+        }).unwrap_or((false, false, false))
+    } else {
+        (false, false, false)
+    };
+
+    let state_changed = check_state_changed(is_dragging, is_scrolling, is_snapped);
+    if state_changed || scale_changed_in_loop {
+        unsafe { update_indicator_layered_image(hwnd) };
+    }
+
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            next_x.round() as i32,
+            next_y.round() as i32,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOACTIVATE,
+        );
+        InvalidateRect(hwnd, std::ptr::null(), 0);
+        UpdateWindow(hwnd);
+    }
+}
+
 pub fn update_indicator_position() {
     if let Some(&hwnd) = INDICATOR_HWND.get() {
         unsafe {
@@ -2319,115 +2321,30 @@ pub fn update_indicator_position() {
                 windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_RESTORE);
             }
 
-            // 3. Foreground window 정보 획득 및 서스펜드 상태 연산
-            let fore_hwnd = GetForegroundWindow();
-
-
-            
-            static LAST_FORE_HWND: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-            static CACHED_PROC: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-            static CACHED_CLASS: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-
-            let last_hwnd = LAST_FORE_HWND.load(std::sync::atomic::Ordering::SeqCst) as HWND;
-            let (proc_name, class_name) = if fore_hwnd == last_hwnd {
-                let proc_lock = CACHED_PROC.get_or_init(|| Mutex::new(None));
-                let class_lock = CACHED_CLASS.get_or_init(|| Mutex::new(None));
-                let p = proc_lock.lock().unwrap().clone();
-                let c = class_lock.lock().unwrap().clone();
-                if p.is_some() && c.is_some() {
-                    (p.unwrap(), c.unwrap())
-                } else {
-                    let (p_new, c_new) = get_foreground_window_info(fore_hwnd);
-                    *proc_lock.lock().unwrap() = Some(p_new.clone());
-                    *class_lock.lock().unwrap() = Some(c_new.clone());
-                    LAST_FORE_HWND.store(fore_hwnd as usize, std::sync::atomic::Ordering::SeqCst);
-                    (p_new, c_new)
-                }
-            } else {
-                let (p_new, c_new) = get_foreground_window_info(fore_hwnd);
-                let proc_lock = CACHED_PROC.get_or_init(|| Mutex::new(None));
-                let class_lock = CACHED_CLASS.get_or_init(|| Mutex::new(None));
-                *proc_lock.lock().unwrap() = Some(p_new.clone());
-                *class_lock.lock().unwrap() = Some(c_new.clone());
-                LAST_FORE_HWND.store(fore_hwnd as usize, std::sync::atomic::Ordering::SeqCst);
-                (p_new, c_new)
-            };
-
+            // 3. 물리 단축키 상태 불일치 점검 및 동기화
             let mut is_shortcut_active = crate::hook::APP_STATE.get()
                 .and_then(|arc| arc.try_lock().ok())
                 .map(|s| s.is_system_shortcut_active())
                 .unwrap_or(false);
+            check_and_sync_physical_modifiers(&mut is_shortcut_active);
 
-            // 훅 유실 등으로 인해 단축키 상태가 꼬였을 가능성을 대비하여 실제 물리 키 상태를 더블체크합니다.
-            if is_shortcut_active {
-                unsafe {
-                    let ctrl_down = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x11) as u32 & 0x8000) != 0; // VK_CONTROL
-                    let menu_down = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x12) as u32 & 0x8000) != 0; // VK_MENU (Alt)
-                    let lwin_down = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x5B) as u32 & 0x8000) != 0; // VK_LWIN
-                    let rwin_down = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x5C) as u32 & 0x8000) != 0; // VK_RWIN
-                    if !ctrl_down && !menu_down && !lwin_down && !rwin_down {
-                        is_shortcut_active = false;
-                        // APP_STATE도 물리 키 상태에 맞게 동기화해 줍니다.
-                        if let Some(state_arc) = crate::hook::APP_STATE.get() {
-                            if let Ok(mut state) = state_arc.try_lock() {
-                                state.ctrl_pressed = false;
-                                state.alt_pressed = false;
-                                state.win_pressed = false;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 단축키 활성화 상태가 해제되었다면, Alt+Tab 등으로 설정된 SUSPEND_CURSOR_HIDE 플래그를 자동으로 해제합니다.
             if !is_shortcut_active {
                 SUSPEND_CURSOR_HIDE.store(false, Ordering::SeqCst);
             }
 
-            let is_shell_active = is_system_shell_foreground_with_info(fore_hwnd, &proc_name, &class_name);
-            let is_hide_suspended = SUSPEND_CURSOR_HIDE.load(Ordering::SeqCst);
-            let is_suspended = is_shortcut_active || is_shell_active || is_hide_suspended;
-
-            // 4. 디버그 로그 기록
-            write_debug_log(fore_hwnd, &proc_name, &class_name, is_suspended, is_shortcut_active, is_shell_active, is_hide_suspended);
+            // 4. 포그라운드 윈도우 스캔 및 서스펜드 상태 분석
+            let fore_hwnd = GetForegroundWindow();
+            let (_, _, is_suspended) = resolve_foreground_suspend_state(fore_hwnd, is_shortcut_active);
 
             // 5. 창 가시성 및 시스템 커서 토글 처리
             let mut is_visible = windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0;
             handle_cursor_visibility(hwnd, is_suspended, &mut is_visible);
 
-            // 6. 클릭 스케일 복구 애니메이션 처리
+            // 6. 클릭 스케일 애니메이션 처리
             let scale_changed_in_loop = update_click_scale();
 
-            // 7. 슬라이딩 보간 좌표 산출
-            let (next_x, next_y) = calculate_interpolated_pos();
-
-            // 8. 드래그, 스크롤, 스냅 상태 획득
-            let (is_dragging, is_scrolling, is_snapped) = if let Some(state_arc) = crate::hook::APP_STATE.get() {
-                state_arc.try_lock().map(|s| {
-                    (s.is_dragging, !s.active_scroll_keys.is_empty(), is_currently_snapped())
-                }).unwrap_or((false, false, false))
-            } else {
-                (false, false, false)
-            };
-
-            // 9. 상태/스케일 변경 감지 시 레이어드 이미지 즉시 갱신
-            let state_changed = check_state_changed(is_dragging, is_scrolling, is_snapped);
-            if state_changed || scale_changed_in_loop {
-                update_indicator_layered_image(hwnd);
-            }
-
-            // 10. 최종 윈도우 위치 동기화 및 강제 드로우
-            SetWindowPos(
-                hwnd,
-                HWND_TOPMOST,
-                next_x.round() as i32,
-                next_y.round() as i32,
-                0,
-                0,
-                SWP_NOSIZE | SWP_NOACTIVATE,
-            );
-            InvalidateRect(hwnd, std::ptr::null(), 0);
-            UpdateWindow(hwnd);
+            // 7. 인디케이터 좌표/위치 동기화 및 렌더링 갱신
+            update_overlay_window_position(hwnd, scale_changed_in_loop);
         }
     }
 }
@@ -2448,7 +2365,6 @@ static CUR_INDICATOR_POS: OnceLock<Mutex<Option<(f64, f64)>>> = OnceLock::new();
 
 /// 마우스 조작 모드에서의 이동 상태(기본 속도, 이탈 여부, 이동 방향, 키 누름 경과 시간)를 획득합니다.
 fn get_movement_status() -> (f64, bool, Option<String>, std::time::Duration) {
-    let mut base_speed = 1.0;
     let mut current_speed = 1.0;
     let mut should_release = false;
     let mut new_dir = None;
@@ -2456,7 +2372,7 @@ fn get_movement_status() -> (f64, bool, Option<String>, std::time::Duration) {
     
     if let Some(state_arc) = crate::hook::APP_STATE.get() {
         let state = state_arc.lock().unwrap();
-        base_speed = state.config.settings.base_speed;
+        let base_speed = state.config.settings.base_speed;
         let max_speed = state.config.settings.max_speed;
         let acceleration = state.config.settings.acceleration;
         
@@ -2812,6 +2728,62 @@ pub fn check_magnetic_snapping() {
     }
 }
 
+fn scan_titlebar_targets(
+    automation: &UIAutomation,
+    element: &uiautomation::core::UIElement,
+    win_rect: &RECT,
+    true_cond: &uiautomation::core::UICondition,
+    clickable_types: &[i32],
+    depth: usize,
+    results: &mut Vec<uiautomation::core::UIElement>,
+) {
+    if depth > 6 {
+        return;
+    }
+    
+    let mut should_traverse = true;
+    
+    if let Ok(rect) = element.get_bounding_rectangle() {
+        let top = rect.get_top() as i32;
+        
+        // 만약 엘리먼트의 상단이 타이틀바 영역(win_rect.top + 100)보다 아래에 있다면 하위 탐색 중단 및 프루닝
+        if top > win_rect.top + 100 {
+            return;
+        }
+        
+        if let Ok(ctrl_type) = element.get_control_type() {
+            let ctrl_type_val = ctrl_type as i32;
+            
+            // Document 타입(웹 페이지 본문 등)은 하위 탐색하지 않음
+            if ctrl_type_val == 50030 {
+                return;
+            }
+            
+            // 클릭 가능한 대상 타입인 경우
+            if clickable_types.contains(&ctrl_type_val) {
+                should_traverse = false;
+                results.push(element.clone());
+            }
+        }
+    }
+    
+    if should_traverse {
+        if let Ok(children) = element.find_all(uiautomation::types::TreeScope::Children, true_cond) {
+            for child in &children {
+                scan_titlebar_targets(
+                    automation,
+                    child,
+                    win_rect,
+                    true_cond,
+                    clickable_types,
+                    depth + 1,
+                    results,
+                );
+            }
+        }
+    }
+}
+
 pub fn start_global_targets_thread() {
     thread::spawn(|| {
         let automation = match UIAutomation::new() {
@@ -2953,62 +2925,84 @@ pub fn start_global_targets_thread() {
             }
             
             if let Ok(element) = automation.element_from_handle(handle) {
-                if let Ok(elements) = element.find_all(uiautomation::types::TreeScope::Descendants, &condition) {
-                    let mut new_targets = Vec::new();
-                    for el in &elements {
-                        if let Ok(rect) = el.get_bounding_rectangle() {
-                            let left = rect.get_left() as i32;
-                            let top = rect.get_top() as i32;
-                            let right = rect.get_right() as i32;
-                            let bottom = rect.get_bottom() as i32;
-                            let w = right - left;
-                            let h = bottom - top;
+                let is_heavy = class_str == "Chrome_WidgetWin_1"
+                    || class_str == "MozillaWindowClass"
+                    || class_str == "ApplicationFrameWindow"
+                    || class_str == "CabinetWClass";
+
+                let mut elements = Vec::new();
+                if is_heavy {
+                    if let Ok(true_cond) = automation.create_true_condition() {
+                        scan_titlebar_targets(
+                            &automation,
+                            &element,
+                            &win_rect,
+                            &true_cond,
+                            &clickable_types,
+                            0,
+                            &mut elements,
+                        );
+                    }
+                } else {
+                    if let Ok(descendants) = element.find_all(uiautomation::types::TreeScope::Descendants, &condition) {
+                        elements = descendants;
+                    }
+                }
+
+                let mut new_targets = Vec::new();
+                for el in &elements {
+                    if let Ok(rect) = el.get_bounding_rectangle() {
+                        let left = rect.get_left() as i32;
+                        let top = rect.get_top() as i32;
+                        let right = rect.get_right() as i32;
+                        let bottom = rect.get_bottom() as i32;
+                        let w = right - left;
+                        let h = bottom - top;
+                        
+                        if w >= 5 && h >= 5 && w <= 800 && h <= 800 {
+                            let is_taskbar = class_str == "Shell_TrayWnd" || class_str == "SecondaryTrayWnd";
+                            let mut is_valid = is_taskbar;
                             
-                            if w >= 5 && h >= 5 && w <= 800 && h <= 800 {
-                                let is_taskbar = class_str == "Shell_TrayWnd" || class_str == "SecondaryTrayWnd";
-                                let mut is_valid = is_taskbar;
+                            if !is_valid {
+                                // Check if it's in the top-left or top-right title bar area of the application window
+                                let in_titlebar_y = top >= win_rect.top - 20 && bottom <= win_rect.top + 80;
+                                let in_top_right = in_titlebar_y && right >= win_rect.right - 200 && left <= win_rect.right + 20;
+                                let in_top_left = in_titlebar_y && left >= win_rect.left - 20 && right <= win_rect.left + 220;
                                 
-                                if !is_valid {
-                                    // Check if it's in the top-left or top-right title bar area of the application window
-                                    let in_titlebar_y = top >= win_rect.top - 20 && bottom <= win_rect.top + 80;
-                                    let in_top_right = in_titlebar_y && right >= win_rect.right - 200 && left <= win_rect.right + 20;
-                                    let in_top_left = in_titlebar_y && left >= win_rect.left - 20 && right <= win_rect.left + 220;
-                                    
-                                    if in_top_right || in_top_left {
-                                        is_valid = true;
-                                    } else {
-                                        // Minimize/Maximize/Close ID/Name check as fallback
-                                        if let Ok(auto_id) = el.get_automation_id() {
-                                            let id_lower = auto_id.to_lowercase();
-                                            if id_lower.contains("minimize") || id_lower.contains("maximize") || id_lower.contains("close") || id_lower.contains("restore") {
-                                                is_valid = true;
-                                            }
+                                if in_top_right || in_top_left {
+                                    is_valid = true;
+                                } else {
+                                    // Minimize/Maximize/Close ID/Name check as fallback
+                                    if let Ok(auto_id) = el.get_automation_id() {
+                                        let id_lower = auto_id.to_lowercase();
+                                        if id_lower.contains("minimize") || id_lower.contains("maximize") || id_lower.contains("close") || id_lower.contains("restore") {
+                                            is_valid = true;
                                         }
-                                        if !is_valid {
-                                            if let Ok(name) = el.get_name() {
-                                                let name_lower = name.to_lowercase();
-                                                if name_lower.contains("최소화") || name_lower.contains("최대화") || name_lower.contains("닫기") || name_lower.contains("복원") ||
-                                                   name_lower.contains("minimize") || name_lower.contains("maximize") || name_lower.contains("close") || name_lower.contains("restore") {
-                                                    is_valid = true;
-                                                }
+                                    }
+                                    if !is_valid {
+                                        if let Ok(name) = el.get_name() {
+                                            let name_lower = name.to_lowercase();
+                                            if name_lower.contains("최소화") || name_lower.contains("최대화") || name_lower.contains("닫기") || name_lower.contains("복원") ||
+                                               name_lower.contains("minimize") || name_lower.contains("maximize") || name_lower.contains("close") || name_lower.contains("restore") {
+                                                is_valid = true;
                                             }
                                         }
                                     }
                                 }
-                                
-                                if is_valid {
-                                    new_targets.push((left + w / 2, top + h / 2));
-                                }
+                            }
+                            
+                            if is_valid {
+                                new_targets.push((left + w / 2, top + h / 2));
                             }
                         }
                     }
-                    
-                    found_targets = !new_targets.is_empty();
-                    log_debug(&format!("UIA thread found {} targets for HWND={}", new_targets.len(), hwnd));
-                    new_targets.truncate(200);
-                    let mut targets = GLOBAL_SNAP_TARGETS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap();
-                    *targets = new_targets;
                 }
+                
+                found_targets = !new_targets.is_empty();
+                log_debug(&format!("UIA thread found {} targets for HWND={}", new_targets.len(), hwnd));
+                new_targets.truncate(200);
+                let mut targets = GLOBAL_SNAP_TARGETS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap();
+                *targets = new_targets;
             }
             
             if found_targets {

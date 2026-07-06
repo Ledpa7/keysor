@@ -565,6 +565,39 @@ fn spawn_drag_detection_thread(state_arc: Arc<Mutex<AppState>>, hold_ms: u64) {
 }
 
 /// 스페이스바를 활용한 좌클릭/더블클릭/드래그앤드롭 기능을 에뮬레이션합니다.
+fn handle_space_keydown(state: &mut AppState, state_arc: &Arc<Mutex<AppState>>) {
+    if !state.is_space_down {
+        state.is_space_down = true;
+        state.space_press_time = Some(Instant::now());
+
+        let hold_ms = state.config.settings.drag_hold_threshold_ms;
+        spawn_drag_detection_thread(Arc::clone(state_arc), hold_ms);
+    }
+}
+
+fn handle_space_keyup(
+    state: &mut AppState,
+    hold_ms: u64,
+    trigger_up: &mut bool,
+    should_start_release_handler: &mut bool,
+) {
+    state.is_space_down = false;
+    let elapsed = state.space_press_time.map_or(Duration::ZERO, |t| t.elapsed());
+    state.space_press_time = None;
+
+    if state.is_dragging {
+        state.is_dragging = false;
+        *trigger_up = true;
+    } else if elapsed < Duration::from_millis(hold_ms) {
+        state.space_tap_count += 1;
+        state.space_last_tap_time = Some(Instant::now());
+        if state.space_tap_count == 1 {
+            *should_start_release_handler = true;
+        }
+    }
+}
+
+/// 스페이스바를 활용한 좌클릭/더블클릭/드래그앤드롭 기능을 에뮬레이션합니다.
 fn process_space_click(
     state_arc: &Arc<Mutex<AppState>>,
     event: &KeyEvent,
@@ -578,30 +611,11 @@ fn process_space_click(
 
         if event.is_keydown {
             println!("[Debug] Space Keydown: is_space_down={}, is_dragging={}", state.is_space_down, state.is_dragging);
-            if !state.is_space_down {
-                state.is_space_down = true;
-                state.space_press_time = Some(Instant::now());
-
-                let hold_ms = state.config.settings.drag_hold_threshold_ms;
-                spawn_drag_detection_thread(Arc::clone(state_arc), hold_ms);
-            }
+            handle_space_keydown(&mut state, state_arc);
         } else if event.is_keyup {
             println!("[Debug] Space Keyup: space_tap_count={}, is_dragging={}", state.space_tap_count, state.is_dragging);
-            state.is_space_down = false;
-            let elapsed = state.space_press_time.map_or(Duration::ZERO, |t| t.elapsed());
-            state.space_press_time = None;
-
             let hold_ms = state.config.settings.drag_hold_threshold_ms;
-            if state.is_dragging {
-                state.is_dragging = false;
-                trigger_up = true;
-            } else if elapsed < Duration::from_millis(hold_ms) {
-                state.space_tap_count += 1;
-                state.space_last_tap_time = Some(Instant::now());
-                if state.space_tap_count == 1 {
-                    should_start_release_handler = true;
-                }
-            }
+            handle_space_keyup(&mut state, hold_ms, &mut trigger_up, &mut should_start_release_handler);
         }
     }
 
