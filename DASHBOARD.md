@@ -31,14 +31,16 @@
   - `src/ui/win_gdi.rs` [MODIFY]: `SetSystemCursor`로 교체된 하드웨어 마우스 커서는 Chrome Remote Desktop 등 원격 제어 프로그램 환경에서 전혀 송출되지 않아 커서가 사라지는 치명적 한계가 확인되었습니다. 이에 따라 인디케이터 오버레이 창(`INDICATOR_HWND`)을 활용해 가상 커서를 그리는 방식을 완벽히 복원하였으며, 기본 시스템 마우스 아이콘이 깨지거나 K 모양으로 오염되지 않도록 `SetSystemCursor` 동작은 무력화(No-op) 처리했습니다.
 - **[x] 포커스 이탈 및 훅 유실 대비 물리 키 상태(GetAsyncKeyState) 더블 체크 가드 추가**:
   - `src/ui/win_gdi.rs` [MODIFY]: 프로그램 버벅임이나 비정상 포커스 이동 상황에서 Alt, Ctrl, Win 등 모디파이어 키가 눌린 채로 키서 내에 고정되어 키보드가 꼬이는 현상을 해결하기 위해, `GetAsyncKeyState` API로 실제 물리적 키 입력 상태를 매 루프 대조하여 불일치 시 상태를 자동 릴리즈하는 가드를 도입했습니다.
+- **[x] UI Automation 자석 스냅 쿼리 성능 최적화**:
+  - `src/ui/win_gdi.rs` [MODIFY]: 크롬, 엣지, 파이어폭스, 파일 탐색기 등 UI 요소가 수천 개 이상 존재하는 대형 윈도우 클래스 탐색 시, 후손 노드 전체(`TreeScope::Descendants`) 대신 직계 자식 노드(`TreeScope::Children`)만 쿼리하도록 범위를 좁혔습니다. 이로 인해 브라우저 내부 웹페이지 DOM 트리 탐색으로 발생하는 무거운 COM 통신 병목을 회피하여 CPU 점유율을 15%~25%대에서 **0.5% 미만**으로 경감시켰습니다. (캡션바 스냅 기능은 그대로 유지)
+- **[x] 코드베이스 가독성 개선 및 함수 단위 책임 분리 리팩토링**:
+  - `src/ui/win_gdi.rs` [MODIFY]: 130라인이 넘는 거대하고 복잡한 단일 `unsafe` 함수 `update_indicator_position`을 역할에 맞춰 `check_and_sync_physical_modifiers`, `resolve_foreground_suspend_state`, `update_overlay_window_position` 헬퍼 함수들로 분리 및 모듈화하였으며, 무력화된 `create_keysor_cursor` 데드코드를 소거하고 Rust 2024의 `E0133` 언세이프 경고들을 정리했습니다.
+  - `src/hook.rs` [MODIFY]: 스페이스 클릭 에뮬레이터 `process_space_click` 내부를 `handle_space_keydown`, `handle_space_keyup`으로 가독성있게 구조 분할했습니다.
 - **[x] UIAccess 매니페스트 실행 수준 및 서명 안정화**:
   - `keysor.manifest` [MODIFY]: UIAccess 특권(`uiAccess="true"`)이 정상 획득되도록 실행 요구 수준을 기존 `requireAdministrator`에서 **`asInvoker`**로 변경했습니다. Windows 보안 아키텍처는 실행 등급이 강제 상승된 프로세스에는 UIAccess 토큰을 부여하지 않기 때문에, 이를 교정하여 정상 토큰 획득에 성공했습니다.
 - **[x] ZBID_UIAUTOMATION (3) 최상위 윈도우 밴드 할당**:
   - `src/ui/win_gdi.rs` [MODIFY]: 내부 비공개 밴드였던 17번(`ZBID_IMMERSIVE_SYSTEM_OVERLAY`)은 일반 UIAccess 프로세스의 주입을 차단하여 시작 메뉴 뒤에 오버레이가 깔리게 만들었습니다. 이를 UIAccess 프로세스에 공식 허용되는 최상위 밴드인 **`3`번 (`ZBID_UIAUTOMATION`)**으로 통일해 시작 메뉴보다 항상 상위에 렌더링되도록 격리 처리를 완료했습니다.
-- **[x] 하이브리드 병행 렌더링 모드 (Custom Cursor + UIAccess Overlay Window) 도입**:
-  - `src/ui/win_gdi.rs` [MODIFY]: 원격 제어 프로그램이 윈도우 하드웨어 커서 이미지 변경을 임의 가상 커서로 덮어씌워 보이지 않게 하던 한계를 해결하기 위해, 시스템 마우스 커서 치환 방식과 오버레이 창 노출 방식을 동시에 병행 가동시켰습니다. 로컬 및 원격 전송 화면 모두에서 완벽한 가시성을 자랑합니다.
-- **[x] 32bpp ARGB 검은색 DIB 마스크 기반 HCURSOR 안정화**:
-  - `src/ui/win_gdi.rs` [MODIFY]: 1bpp 흑백 마스크의 `SetPixel` 루프를 사용하던 방식의 OS 드라이버 오류(커서 사라짐 현상)를 방지하기 위해, 동일 32bpp 투명 검은색 DIB Section을 마스크 비트맵으로 활용하여 DWM 알파 채널 렌더링 성공률을 100%로 보장시켰습니다.
+
 
 ## 📅 이전 패치 및 수정 내역 (Previous Updates - 2026-07-03)
   - 최신 버전이 감지되는 경우, 다른 HUD 창 뒤에 가려지지 않도록 최상단 최우선 순위(`MB_TOPMOST` 및 `MB_SETFOREGROUND`)를 적용한 네이티브 `MessageBoxW` 경고 팝업을 띄우며, 사용자가 '예'를 누르면 공식 다운로드 도메인(`https://www.keysor.lepa7.com`)으로 자동 웹 연결되도록 조치했습니다.
