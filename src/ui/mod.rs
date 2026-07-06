@@ -36,6 +36,9 @@ pub trait KeysorUi: Send + Sync + 'static {
 #[cfg(windows)]
 pub mod win_gdi;
 
+#[cfg(windows)]
+pub mod win_uia;
+
 #[cfg(target_os = "macos")]
 pub mod macos_dummy;
 
