@@ -1,11 +1,10 @@
-$desktop = [Environment]::GetFolderPath("Desktop")
-$shortcutPath = Join-Path $desktop "Keysor.lnk"
-$targetPath = "c:\Users\wjdwl\.gemini\antigravity\scratch\14-Keysor\target\release\keysor_rounded.exe"
-$workingDir = "c:\Users\wjdwl\.gemini\antigravity\scratch\14-Keysor"
-
+if (Test-Path "C:\Users\wjdwl\Desktop\keysor.exe") {
+    Remove-Item "C:\Users\wjdwl\Desktop\keysor.exe" -Force
+    Write-Host "Removed keysor.exe from Desktop"
+}
 $WshShell = New-Object -ComObject WScript.Shell
-$Shortcut = $WshShell.CreateShortcut($shortcutPath)
-$Shortcut.TargetPath = $targetPath
-$Shortcut.WorkingDirectory = $workingDir
+$Shortcut = $WshShell.CreateShortcut("C:\Users\wjdwl\Desktop\keysor.lnk")
+$Shortcut.TargetPath = "c:\Users\wjdwl\.gemini\antigravity\scratch\14-Keysor\target\release\keysor.exe"
+$Shortcut.WorkingDirectory = "c:\Users\wjdwl\.gemini\antigravity\scratch\14-Keysor"
 $Shortcut.Save()
-Write-Host "Keysor shortcut created at $shortcutPath"
+Write-Host "Successfully created keysor.lnk on Desktop"

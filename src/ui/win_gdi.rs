@@ -1106,28 +1106,34 @@ unsafe extern "system" fn hud_wnd_proc(
                 let g_desc = if lang_en { "R-Clk" } else { "우클릭" };
                 let space_desc = if lang_en { "Left Click (1:L / 2:Db / Hold:Drag)" } else { "좌클릭 (1:일반 / 2:더블 / 홀드:드래그)" };
                 
+                let ui_status = if unsafe { is_process_uiaccess_active() } {
+                    if lang_en { " [UIAccess: ON]" } else { " [UIAccess: 활성화]" }
+                } else {
+                    if lang_en { " [UIAccess: OFF (StartMenu Blocked)]" } else { " [UIAccess: 비활성화 (시작메뉴 가려짐)]" }
+                };
+
                 let title_text = if is_pro {
                     if lang_en {
-                        "Keysor, Keyboard & Cursor as One!".to_string()
+                        format!("Keysor, Keyboard & Cursor as One!{}", ui_status)
                     } else {
-                        "Keysor, 키보드와 커서를 하나로!".to_string()
+                        format!("Keysor, 키보드와 커서를 하나로!{}", ui_status)
                     }
                 } else if is_trial {
                     if let Some(days) = crate::license::get_remaining_trial_days() {
                         if lang_en {
-                            format!("Keysor Trial ({} days left)", days)
+                            format!("Keysor Trial ({} days left){}", days, ui_status)
                         } else {
-                            format!("키서 평가판 ({}일 남음)", days)
+                            format!("키서 평가판 ({}일 남음){}", days, ui_status)
                         }
                     } else if lang_en {
-                        "Keysor Free (Trial Expired)".to_string()
+                        format!("Keysor Free (Trial Expired){}", ui_status)
                     } else {
-                        "키서 무료 버전 (평가판 만료)".to_string()
+                        format!("키서 무료 버전 (평가판 만료){}", ui_status)
                     }
                 } else if lang_en {
-                    "Keysor Free (Trial Expired)".to_string()
+                    format!("Keysor Free (Trial Expired){}", ui_status)
                 } else {
-                    "키서 무료 버전 (평가판 만료)".to_string()
+                    format!("키서 무료 버전 (평가판 만료){}", ui_status)
                 };
                 let speed_sens_title = "SPEED SENS";
                 
@@ -1659,6 +1665,117 @@ unsafe extern "system" fn hud_wnd_proc(
     }
 }
 
+pub unsafe fn set_window_band_safe(hwnd: HWND, band: u32) -> bool {
+    let user32 = windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(encode_wide("user32.dll").as_ptr());
+    if user32 != 0 {
+        let proc = windows_sys::Win32::System::LibraryLoader::GetProcAddress(
+            user32,
+            b"SetWindowBand\0".as_ptr() as *const _,
+        );
+        if let Some(set_window_band) = proc {
+            let set_window_band: extern "system" fn(HWND, HWND, u32) -> i32 = std::mem::transmute(set_window_band);
+            return set_window_band(hwnd, 0, band) != 0;
+        }
+    }
+    false
+}
+pub unsafe fn create_keysor_cursor() -> windows_sys::Win32::UI::WindowsAndMessaging::HCURSOR {
+    use windows_sys::Win32::Graphics::Gdi::*;
+    use windows_sys::Win32::Graphics::GdiPlus::*;
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+    let size = 32i32;
+    let hdc_screen = GetDC(0);
+    let hdc_color = CreateCompatibleDC(hdc_screen);
+    let hdc_mask = CreateCompatibleDC(hdc_screen);
+
+    // 32bpp 컬러 비트맵 (알파 블렌딩)
+    let mut bmi: BITMAPINFO = std::mem::zeroed();
+    bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+    bmi.bmiHeader.biWidth = size;
+    bmi.bmiHeader.biHeight = -size;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    let mut bits_color: *mut std::ffi::c_void = std::ptr::null_mut();
+    let hbm_color = CreateDIBSection(hdc_color, &bmi, DIB_RGB_COLORS, &mut bits_color, 0, 0);
+
+    // 1bpp 모노크롬 마스크 비트맵 (전부 흰색 = 컬러 비트맵의 알파로 결정)
+    let hbm_mask = CreateBitmap(size, size, 1, 1, std::ptr::null());
+
+    if hbm_color == 0 || hbm_mask == 0 || bits_color.is_null() {
+        if hbm_color != 0 { DeleteObject(hbm_color); }
+        if hbm_mask != 0 { DeleteObject(hbm_mask); }
+        DeleteDC(hdc_color);
+        DeleteDC(hdc_mask);
+        ReleaseDC(0, hdc_screen);
+        return 0;
+    }
+
+    let old_color = SelectObject(hdc_color, hbm_color);
+
+    // 전체 투명으로 초기화 (alpha = 0)
+    std::ptr::write_bytes(bits_color, 0, (size * size * 4) as usize);
+
+    // GDI+로 에메랄드 K 심볼 그리기
+    let mut graphics = std::ptr::null_mut();
+    if GdipCreateFromHDC(hdc_color, &mut graphics) == 0 {
+        GdipSetSmoothingMode(graphics, SmoothingModeAntiAlias);
+
+        // 검은 외곽선 (4px)
+        let mut black_pen = std::ptr::null_mut();
+        if GdipCreatePen1(0xFF000000u32, 4.0, 2, &mut black_pen) == 0 {
+            GdipSetPenStartCap(black_pen, 2);
+            GdipSetPenEndCap(black_pen, 2);
+            GdipSetPenLineJoin(black_pen, 2);
+            GdipDrawLineI(graphics, black_pen, 8, 4, 8, 28);
+            GdipDrawLineI(graphics, black_pen, 8, 16, 24, 4);
+            GdipDrawLineI(graphics, black_pen, 8, 16, 24, 28);
+            GdipDeletePen(black_pen);
+        }
+
+        // 에메랄드 그라디언트 채우기 (2.5px)
+        let p1 = PointF { X: 8.0, Y: 4.0 };
+        let p2 = PointF { X: 24.0, Y: 28.0 };
+        let mut brush = std::ptr::null_mut();
+        if GdipCreateLineBrush(&p1, &p2, 0xFF2FFFAD_u32, 0xFF00C853_u32, 0, &mut brush) == 0 {
+            let mut grad_pen = std::ptr::null_mut();
+            if GdipCreatePen2(brush, 2.5, 2, &mut grad_pen) == 0 {
+                GdipSetPenStartCap(grad_pen, 2);
+                GdipSetPenEndCap(grad_pen, 2);
+                GdipSetPenLineJoin(grad_pen, 2);
+                GdipDrawLineI(graphics, grad_pen, 8, 4, 8, 28);
+                GdipDrawLineI(graphics, grad_pen, 8, 16, 24, 4);
+                GdipDrawLineI(graphics, grad_pen, 8, 16, 24, 28);
+                GdipDeletePen(grad_pen);
+            }
+            GdipDeleteBrush(brush);
+        }
+
+        GdipDeleteGraphics(graphics);
+    }
+
+    SelectObject(hdc_color, old_color);
+    DeleteDC(hdc_color);
+    DeleteDC(hdc_mask);
+    ReleaseDC(0, hdc_screen);
+
+    let info = ICONINFO {
+        fIcon: 0,
+        xHotspot: 8,
+        yHotspot: 8,
+        hbmMask: hbm_mask,
+        hbmColor: hbm_color,
+    };
+
+    let hcursor = CreateIconIndirect(&info);
+    DeleteObject(hbm_color);
+    DeleteObject(hbm_mask);
+    hcursor
+}
+
+
 pub fn start_indicator() {
     start_global_targets_thread();
     thread::spawn(|| unsafe {
@@ -1759,6 +1876,9 @@ pub fn start_indicator() {
 
         if main_hwnd != 0 {
             MAIN_HWND.set(main_hwnd).ok();
+            unsafe {
+                set_window_band_safe(main_hwnd, 3);
+            }
             // 시스템 메뉴를 얻어서 커스텀 항목 추가
             let sys_menu = GetSystemMenu(main_hwnd, 0);
             if sys_menu != 0 {
@@ -1772,7 +1892,7 @@ pub fn start_indicator() {
 
         // 5. Create Indicator Window
         let hwnd = CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
             class_name_wide.as_ptr(),
             std::ptr::null(),
             WS_POPUP,
@@ -1792,6 +1912,9 @@ pub fn start_indicator() {
         }
 
         INDICATOR_HWND.set(hwnd).ok();
+        unsafe {
+            set_window_band_safe(hwnd, 3); // ZBID_UIAUTOMATION (공식 UIAccess용 최상위 윈도우 밴드 주입)
+        }
         update_indicator_layered_image(hwnd);
 
         // 6. Create HUD Window
@@ -1804,7 +1927,7 @@ pub fn start_indicator() {
         let hud_y = (screen_height - hud_h) / 2;
 
         let hud_hwnd = CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+            WS_EX_LAYERED | WS_EX_NOACTIVATE,
             hud_class_name.as_ptr(),
             std::ptr::null(),
             WS_POPUP,
@@ -1825,6 +1948,9 @@ pub fn start_indicator() {
 
         SetLayeredWindowAttributes(hud_hwnd, 0, 230, LWA_ALPHA); 
         HUD_HWND.set(hud_hwnd).ok();
+        unsafe {
+            set_window_band_safe(hud_hwnd, 3);
+        }
 
         // 타이머 제거, 최초 팝업 상시 노출
         ShowWindow(hud_hwnd, SW_SHOWNA);
@@ -1844,46 +1970,22 @@ pub fn start_indicator() {
 
 static HIDE_CURSOR_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+
+fn hide_system_cursor_internal() {
+    // SetSystemCursor는 Chrome Remote Desktop 환경에서 전혀 전송되지 않으며
+    // 기본 커서를 오염시키므로 호출하지 않음. 오버레이 창으로만 커서를 표현함.
+}
+
 pub fn hide_system_cursor() {
     if HIDE_CURSOR_ACTIVE.swap(true, Ordering::SeqCst) {
         return;
     }
+    hide_system_cursor_internal();
+}
 
-    unsafe {
-        let and_mask: [u8; 128] = [0xFF; 128];
-        let xor_mask: [u8; 128] = [0x00; 128];
-
-        let cursor_ids = [
-            32512, // OCR_NORMAL
-            32513, // OCR_IBEAM
-            32514, // OCR_WAIT
-            32515, // OCR_CROSS
-            32516, // OCR_UP
-            32642, // OCR_SIZENWSE
-            32643, // OCR_SIZENESW
-            32644, // OCR_SIZEWE
-            32645, // OCR_SIZENS
-            32646, // OCR_SIZEALL
-            32648, // OCR_NO
-            32649, // OCR_HAND
-            32650, // OCR_APPSTARTING
-        ];
-
-        for &id in &cursor_ids {
-            let blank = windows_sys::Win32::UI::WindowsAndMessaging::CreateCursor(
-                0,
-                0,
-                0,
-                32,
-                32,
-                and_mask.as_ptr() as *const _,
-                xor_mask.as_ptr() as *const _,
-            );
-            if blank != 0 {
-                windows_sys::Win32::UI::WindowsAndMessaging::SetSystemCursor(blank, id);
-            }
-        }
-    }
+pub fn force_hide_system_cursor() {
+    HIDE_CURSOR_ACTIVE.store(true, Ordering::SeqCst);
+    hide_system_cursor_internal();
 }
 
 pub fn restore_system_cursor() {
@@ -1929,28 +2031,18 @@ pub fn force_restore_system_cursor() {
 
 pub fn show_indicator() {
     println!("[Debug] show_indicator() called");
+    // SetSystemCursor로 OS 레벨 마우스 포인터 자체를 K 커서로 교체함.
+    // INDICATOR_HWND 오버레이 창은 시작 메뉴에 가려지므로 사용하지 않음.
     hide_system_cursor();
     if let Some(&main_hwnd) = MAIN_HWND.get() {
         unsafe {
             windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(main_hwnd, SW_MINIMIZE);
         }
     }
+    // INDICATOR_HWND는 숨겨둔 채로 유지 - 시스템 커서로만 표현
     if let Some(&hwnd) = INDICATOR_HWND.get() {
         unsafe {
-            let mut pt = POINT { x: 0, y: 0 };
-            windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt);
-            SetWindowPos(
-                hwnd,
-                HWND_TOPMOST,
-                pt.x - 16,
-                pt.y - 16,
-                0,
-                0,
-                SWP_NOSIZE | SWP_NOACTIVATE,
-            );
-            ShowWindow(hwnd, SW_SHOWNA);
-            InvalidateRect(hwnd, std::ptr::null(), 0);
-            UpdateWindow(hwnd);
+            ShowWindow(hwnd, SW_HIDE);
         }
     }
 }
@@ -2021,30 +2113,37 @@ unsafe fn is_system_shell_foreground_with_info(hwnd: HWND, proc_name: &str, clas
             return false;
         }
 
+        let mut is_system_shell = false;
+
         if proc_name == "explorer.exe" {
-            // 오직 바탕화면(Progman, WorkerW)과 작업 표시줄(Shell_TrayWnd, SecondaryTrayWnd)만 쉘 포그라운드로 인정
             if class_name == "Progman" 
                 || class_name == "WorkerW" 
                 || class_name == "Shell_TrayWnd" 
                 || class_name == "SecondaryTrayWnd" 
             {
-                // Keysor가 마우스 모드 중이라면 쉘 윈도우 포그라운드로 인해 커서가 숨겨지지 않도록 함
-                if let Some(state_arc) = crate::hook::APP_STATE.get() {
-                    if let Ok(state) = state_arc.try_lock() {
-                        if state.is_mouse_mode {
-                            return false;
-                        }
-                    }
-                }
-                return true;
+                is_system_shell = true;
             }
-            return false;
-        }
-
-        proc_name == "startmenuexperiencehost.exe" 
+        } else if proc_name == "startmenuexperiencehost.exe" 
             || proc_name == "searchhost.exe" 
             || proc_name == "shellexperiencehost.exe" 
             || proc_name == "applicationframehost.exe"
+        {
+            is_system_shell = true;
+        }
+
+        if is_system_shell {
+            // Keysor가 마우스 모드 중이라면 쉘 윈도우 포그라운드로 인해 커서가 숨겨지지 않도록 함
+            if let Some(state_arc) = crate::hook::APP_STATE.get() {
+                if let Ok(state) = state_arc.try_lock() {
+                    if state.is_mouse_mode {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        false
     }
 }
 
@@ -2097,35 +2196,38 @@ fn write_debug_log(
 
 fn handle_cursor_visibility(hwnd: HWND, is_suspended: bool, is_visible: &mut bool) {
     unsafe {
-        if !*is_visible && !is_suspended {
-            windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNA);
-            *is_visible = windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0;
+        let current_mouse_mode = if let Some(state_arc) = crate::hook::APP_STATE.get() {
+            state_arc.try_lock().map(|s| s.is_mouse_mode).unwrap_or(false)
+        } else {
+            false
+        };
+
+        static mut LAST_STATE: Option<(bool, bool)> = None;
+
+        let state_changed = match LAST_STATE {
+            Some((m, s)) => m != current_mouse_mode || s != is_suspended,
+            None => true,
+        };
+
+        if state_changed {
+            if current_mouse_mode && !is_suspended {
+                force_hide_system_cursor();
+            } else {
+                force_restore_system_cursor();
+            }
+            LAST_STATE = Some((current_mouse_mode, is_suspended));
         }
 
-        static mut PREV_SUSPENDED: bool = false;
-
-        if *is_visible && !is_suspended {
-            hide_system_cursor();
-            PREV_SUSPENDED = false;
-        } else {
-            if is_suspended {
-                if !PREV_SUSPENDED {
-                    force_restore_system_cursor();
-                } else {
-                    static mut RESTORE_TICK: u32 = 0;
-                    RESTORE_TICK = (RESTORE_TICK + 1) % 10;
-                    if RESTORE_TICK == 0 {
-                        force_restore_system_cursor();
-                    }
-                }
-                PREV_SUSPENDED = true;
-            } else {
-                restore_system_cursor();
-                PREV_SUSPENDED = false;
+        // 오버레이 창으로 커서 표시 (SetSystemCursor는 CRD에서 전송 안 됨)
+        if current_mouse_mode && !is_suspended {
+            if !*is_visible {
+                windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNA);
+                *is_visible = windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0;
             }
-
-            if *is_visible && is_suspended {
+        } else {
+            if *is_visible {
                 windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE);
+                *is_visible = false;
             }
         }
     }
@@ -2219,6 +2321,8 @@ pub fn update_indicator_position() {
 
             // 3. Foreground window 정보 획득 및 서스펜드 상태 연산
             let fore_hwnd = GetForegroundWindow();
+
+
             
             static LAST_FORE_HWND: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
             static CACHED_PROC: OnceLock<Mutex<Option<String>>> = OnceLock::new();
@@ -2249,10 +2353,36 @@ pub fn update_indicator_position() {
                 (p_new, c_new)
             };
 
-            let is_shortcut_active = crate::hook::APP_STATE.get()
+            let mut is_shortcut_active = crate::hook::APP_STATE.get()
                 .and_then(|arc| arc.try_lock().ok())
                 .map(|s| s.is_system_shortcut_active())
                 .unwrap_or(false);
+
+            // 훅 유실 등으로 인해 단축키 상태가 꼬였을 가능성을 대비하여 실제 물리 키 상태를 더블체크합니다.
+            if is_shortcut_active {
+                unsafe {
+                    let ctrl_down = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x11) as u32 & 0x8000) != 0; // VK_CONTROL
+                    let menu_down = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x12) as u32 & 0x8000) != 0; // VK_MENU (Alt)
+                    let lwin_down = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x5B) as u32 & 0x8000) != 0; // VK_LWIN
+                    let rwin_down = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x5C) as u32 & 0x8000) != 0; // VK_RWIN
+                    if !ctrl_down && !menu_down && !lwin_down && !rwin_down {
+                        is_shortcut_active = false;
+                        // APP_STATE도 물리 키 상태에 맞게 동기화해 줍니다.
+                        if let Some(state_arc) = crate::hook::APP_STATE.get() {
+                            if let Ok(mut state) = state_arc.try_lock() {
+                                state.ctrl_pressed = false;
+                                state.alt_pressed = false;
+                                state.win_pressed = false;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 단축키 활성화 상태가 해제되었다면, Alt+Tab 등으로 설정된 SUSPEND_CURSOR_HIDE 플래그를 자동으로 해제합니다.
+            if !is_shortcut_active {
+                SUSPEND_CURSOR_HIDE.store(false, Ordering::SeqCst);
+            }
 
             let is_shell_active = is_system_shell_foreground_with_info(fore_hwnd, &proc_name, &class_name);
             let is_hide_suspended = SUSPEND_CURSOR_HIDE.load(Ordering::SeqCst);
@@ -3154,4 +3284,28 @@ fn log_debug(msg: &str) {
         use std::io::Write;
         let _ = writeln!(file, "[{:?}] {}", std::time::Instant::now(), msg);
     }
+}
+
+pub unsafe fn is_process_uiaccess_active() -> bool {
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_QUERY, TokenUIAccess};
+    use windows_sys::Win32::Foundation::{HANDLE, CloseHandle};
+
+    let mut token: HANDLE = 0;
+    if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) != 0 {
+        let mut uia_state: u32 = 0;
+        let mut return_len: u32 = 0;
+        let success = GetTokenInformation(
+            token,
+            TokenUIAccess, // TokenUIAccess
+            &mut uia_state as *mut _ as *mut _,
+            std::mem::size_of::<u32>() as u32,
+            &mut return_len,
+        );
+        CloseHandle(token);
+        if success != 0 {
+            return uia_state != 0;
+        }
+    }
+    false
 }
