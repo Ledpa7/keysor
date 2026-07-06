@@ -82,12 +82,12 @@ fn get_movement_status() -> (f64, bool, Option<String>, std::time::Duration) {
 fn calculate_cooldown_limit(hold_duration: std::time::Duration) -> u64 {
     let hold_ms = hold_duration.as_millis();
     if hold_ms < 400 {
-        300
+        200
     } else if hold_ms < 1000 {
         let progress = (hold_ms - 400) as f64 / 600.0;
-        (300.0 - progress * 220.0) as u64
+        (200.0 - progress * 150.0) as u64
     } else {
-        80
+        50
     }
 }
 
