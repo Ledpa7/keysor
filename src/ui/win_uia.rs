@@ -396,6 +396,11 @@ pub fn check_magnetic_snapping() {
                 windows_sys::Win32::UI::WindowsAndMessaging::SetCursorPos(next_x.round() as i32, next_y.round() as i32);
                 HUD_LAST_SNAPPED.store(best_target_id, std::sync::atomic::Ordering::SeqCst);
                 HUD_LANDED.store(false, std::sync::atomic::Ordering::SeqCst);
+                
+                let last_jump = LAST_JUMP_TIME.get_or_init(|| Mutex::new(std::time::Instant::now()));
+                if let Ok(mut lj) = last_jump.lock() {
+                    *lj = std::time::Instant::now();
+                }
             }
         }
     }
@@ -915,6 +920,11 @@ pub fn check_global_magnetic_snapping() {
                 windows_sys::Win32::UI::WindowsAndMessaging::SetCursorPos(next_x.round() as i32, next_y.round() as i32);
             }
             *last_pos = Some((best_target.0, best_target.1, false));
+            
+            let last_jump = LAST_JUMP_TIME.get_or_init(|| Mutex::new(std::time::Instant::now()));
+            if let Ok(mut lj) = last_jump.lock() {
+                *lj = std::time::Instant::now();
+            }
         }
     }
 }
