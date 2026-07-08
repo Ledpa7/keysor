@@ -524,9 +524,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (hudState.showDetail) {
       hudSensValue.classList.add('hidden');
       hudSensDetails.classList.remove('hidden');
+      hudBtnDetail.className = 'absolute left-[20px] top-[210px] w-[100px] h-8 bg-[#2FFFAD] border border-[#3C4040] text-slate-900 text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:brightness-110';
     } else {
       hudSensValue.classList.remove('hidden');
       hudSensDetails.classList.add('hidden');
+      hudBtnDetail.className = 'absolute left-[20px] top-[210px] w-[100px] h-8 bg-[#202424] border border-[#3C4040] text-slate-300 text-[10px] font-bold font-mono rounded cursor-pointer transition-all hover:border-[#2FFFAD]';
     }
 
     // 3. Toggles
