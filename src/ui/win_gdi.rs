@@ -8,7 +8,8 @@ use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, EndPaint, CreateSolidBrush, DeleteObject, SelectObject, CreatePen,
     InvalidateRect, UpdateWindow, RoundRect, SetTextColor, SetBkMode, DrawTextW,
     CreateFontW, GetDC, ReleaseDC, CreateCompatibleDC, CreateDIBSection, DeleteDC,
-    BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, AC_SRC_OVER, AC_SRC_ALPHA
+    BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, AC_SRC_OVER, AC_SRC_ALPHA,
+    CreateCompatibleBitmap, BitBlt, SRCCOPY
 };
 use windows_sys::Win32::Graphics::GdiPlus::{
     GdiplusStartup, GdiplusStartupInput,
@@ -1056,10 +1057,17 @@ unsafe extern "system" fn hud_wnd_proc(
         match msg {
             WM_PAINT => {
                 let mut ps = std::mem::zeroed();
-                let hdc = BeginPaint(hwnd, &mut ps);
+                let hdc_paint = BeginPaint(hwnd, &mut ps);
 
                 let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
                 GetClientRect(hwnd, &mut rect);
+                let width = rect.right;
+                let height = rect.bottom;
+
+                // Double Buffering: Create memory DC & Bitmap compatible with screen DC
+                let hdc = CreateCompatibleDC(hdc_paint);
+                let h_bm = CreateCompatibleBitmap(hdc_paint, width, height);
+                let old_bm = SelectObject(hdc, h_bm);
 
                 let bg_brush = CreateSolidBrush(0x121210);
                 let border_pen = CreatePen(0, 2, 0xADFF2F);
@@ -1067,7 +1075,7 @@ unsafe extern "system" fn hud_wnd_proc(
                 let old_brush = SelectObject(hdc, bg_brush);
                 let old_pen = SelectObject(hdc, border_pen);
                 
-                RoundRect(hdc, 0, 0, rect.right, rect.bottom, 16, 16);
+                RoundRect(hdc, 0, 0, width, height, 16, 16);
                 
                 SetBkMode(hdc, 1);
                 
@@ -1488,6 +1496,12 @@ unsafe extern "system" fn hud_wnd_proc(
                 SelectObject(hdc, old_pen);
                 DeleteObject(bg_brush);
                 DeleteObject(border_pen);
+
+                // Double Buffering: Copy offscreen bitmap to screen DC, and delete compatibility objects
+                BitBlt(hdc_paint, 0, 0, width, height, hdc, 0, 0, SRCCOPY);
+                SelectObject(hdc, old_bm);
+                DeleteObject(h_bm);
+                DeleteDC(hdc);
 
                 EndPaint(hwnd, &ps);
                 0
