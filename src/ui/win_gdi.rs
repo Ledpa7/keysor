@@ -1396,7 +1396,7 @@ unsafe extern "system" fn hud_wnd_proc(
                 let (pm_bg, pm_border, pm_text_color) = if !(is_pro || is_trial) {
                     (0x121414, 0x222222, 0x333333)
                 } else if pm_enabled {
-                    if hover_val == 5 { (0xBCFF7A, 0xADFF2F, 0xFFFFFF) } else { (0xADFF2F, 0x3C4040, 0xFFFFFF) }
+                    if hover_val == 5 { (0xBCFF7A, 0xADFF2F, 0x000000) } else { (0xADFF2F, 0x3C4040, 0x000000) }
                 } else {
                     if hover_val == 5 { (0x3C4040, 0xADFF2F, 0xFFFFFF) } else { (0x202424, 0x3C4040, 0x888888) }
                 };
@@ -1415,7 +1415,7 @@ unsafe extern "system" fn hud_wnd_proc(
                 let (mag_bg, mag_border, mag_text_color) = if !(is_pro || is_trial) {
                     (0x121414, 0x222222, 0x333333)
                 } else if magnet_enabled {
-                    if hover_val == 7 { (0xBCFF7A, 0xADFF2F, 0xFFFFFF) } else { (0xADFF2F, 0x3C4040, 0xFFFFFF) }
+                    if hover_val == 7 { (0xBCFF7A, 0xADFF2F, 0x000000) } else { (0xADFF2F, 0x3C4040, 0x000000) }
                 } else {
                     if hover_val == 7 { (0x3C4040, 0xADFF2F, 0xFFFFFF) } else { (0x202424, 0x3C4040, 0x888888) }
                 };
@@ -1431,7 +1431,7 @@ unsafe extern "system" fn hud_wnd_proc(
                 let (si_bg, si_border, si_text_color) = if !(is_pro || is_trial) {
                     (0x121414, 0x222222, 0x333333)
                 } else if sens_info_enabled {
-                    if hover_val == 8 { (0xBCFF7A, 0xADFF2F, 0xFFFFFF) } else { (0xADFF2F, 0x3C4040, 0xFFFFFF) }
+                    if hover_val == 8 { (0xBCFF7A, 0xADFF2F, 0x000000) } else { (0xADFF2F, 0x3C4040, 0x000000) }
                 } else {
                     if hover_val == 8 { (0x3C4040, 0xADFF2F, 0xFFFFFF) } else { (0x202424, 0x3C4040, 0x888888) }
                 };
@@ -1616,8 +1616,8 @@ unsafe extern "system" fn hud_wnd_proc(
                                     toggle_magnet();
                                 }
                                 HudHitTarget::ToggleDetail => {
-                                    SHOW_ALL_SENS.store(true, Ordering::SeqCst);
-                                    windows_sys::Win32::UI::Input::KeyboardAndMouse::SetCapture(hwnd);
+                                    let prev = SHOW_ALL_SENS.load(Ordering::SeqCst);
+                                    SHOW_ALL_SENS.store(!prev, Ordering::SeqCst);
                                 }
                                 _ => {}
                             }
@@ -1651,11 +1651,6 @@ unsafe extern "system" fn hud_wnd_proc(
             }
             windows_sys::Win32::UI::WindowsAndMessaging::WM_LBUTTONUP => {
                 windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
-                let cur = SHOW_ALL_SENS.load(Ordering::SeqCst);
-                if cur {
-                    SHOW_ALL_SENS.store(false, Ordering::SeqCst);
-                    InvalidateRect(hwnd, std::ptr::null(), 0);
-                }
                 0
             }
             windows_sys::Win32::UI::WindowsAndMessaging::WM_ERASEBKGND => {
