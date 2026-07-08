@@ -1102,34 +1102,28 @@ unsafe extern "system" fn hud_wnd_proc(
                 let g_desc = if lang_en { "R-Clk" } else { "우클릭" };
                 let space_desc = if lang_en { "Left Click (1:L / 2:Db / Hold:Drag)" } else { "좌클릭 (1:일반 / 2:더블 / 홀드:드래그)" };
                 
-                let ui_status = if unsafe { is_process_uiaccess_active() } {
-                    if lang_en { " [UIAccess: ON]" } else { " [UIAccess: 활성화]" }
-                } else {
-                    if lang_en { " [UIAccess: OFF (StartMenu Blocked)]" } else { " [UIAccess: 비활성화 (시작메뉴 가려짐)]" }
-                };
-
                 let title_text = if is_pro {
                     if lang_en {
-                        format!("Keysor, Keyboard & Cursor as One!{}", ui_status)
+                        format!("Keysor, Keyboard & Cursor as One!")
                     } else {
-                        format!("Keysor, 키보드와 커서를 하나로!{}", ui_status)
+                        format!("Keysor, 키보드와 커서를 하나로!")
                     }
                 } else if is_trial {
                     if let Some(days) = crate::license::get_remaining_trial_days() {
                         if lang_en {
-                            format!("Keysor Trial ({} days left){}", days, ui_status)
+                            format!("Keysor Trial ({} days left)", days)
                         } else {
-                            format!("키서 평가판 ({}일 남음){}", days, ui_status)
+                            format!("키서 평가판 ({}일 남음)", days)
                         }
                     } else if lang_en {
-                        format!("Keysor Free (Trial Expired){}", ui_status)
+                        format!("Keysor Free (Trial Expired)")
                     } else {
-                        format!("키서 무료 버전 (평가판 만료){}", ui_status)
+                        format!("키서 무료 버전 (평가판 만료)")
                     }
                 } else if lang_en {
-                    format!("Keysor Free (Trial Expired){}", ui_status)
+                    format!("Keysor Free (Trial Expired)")
                 } else {
-                    format!("키서 무료 버전 (평가판 만료){}", ui_status)
+                    format!("키서 무료 버전 (평가판 만료)")
                 };
                 let speed_sens_title = "SPEED SENS";
                 
@@ -1874,8 +1868,44 @@ static HIDE_CURSOR_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::At
 
 
 fn hide_system_cursor_internal() {
-    // SetSystemCursor는 Chrome Remote Desktop 환경에서 전혀 전송되지 않으며
-    // 기본 커서를 오염시키므로 호출하지 않음. 오버레이 창으로만 커서를 표현함.
+    // SetSystemCursor는 Chrome Remote Desktop 환경에서 전혀 전송되지 않아 한때 억제되었으나,
+    // 일반 PC 환경에서 키서 모드 실행 시 기본 마우스 커서와 키서 가상 커서가 동시 노출/잔상이 남는 문제를
+    // 해결하기 위해 시스템 기본 커서들을 전역적으로 투명하게 은폐하는 로직을 복원합니다.
+    unsafe {
+        let and_mask: [u8; 128] = [0xFF; 128];
+        let xor_mask: [u8; 128] = [0x00; 128];
+
+        let cursor_ids = [
+            32512, // OCR_NORMAL
+            32513, // OCR_IBEAM
+            32514, // OCR_WAIT
+            32515, // OCR_CROSS
+            32516, // OCR_UP
+            32642, // OCR_SIZENWSE
+            32643, // OCR_SIZENESW
+            32644, // OCR_SIZEWE
+            32645, // OCR_SIZENS
+            32646, // OCR_SIZEALL
+            32648, // OCR_NO
+            32649, // OCR_HAND
+            32650, // OCR_APPSTARTING
+        ];
+
+        for &id in &cursor_ids {
+            let blank = windows_sys::Win32::UI::WindowsAndMessaging::CreateCursor(
+                0,
+                0,
+                0,
+                32,
+                32,
+                and_mask.as_ptr() as *const _,
+                xor_mask.as_ptr() as *const _,
+            );
+            if blank != 0 {
+                windows_sys::Win32::UI::WindowsAndMessaging::SetSystemCursor(blank, id);
+            }
+        }
+    }
 }
 
 pub fn hide_system_cursor() {
@@ -2015,7 +2045,8 @@ unsafe fn is_system_shell_foreground_with_info(hwnd: HWND, proc_name: &str, clas
             return false;
         }
 
-        let mut is_system_shell = false;
+        let mut is_background_or_taskbar = false;
+        let mut is_start_menu_or_search = false;
 
         if proc_name == "explorer.exe" {
             if class_name == "Progman" 
@@ -2023,18 +2054,26 @@ unsafe fn is_system_shell_foreground_with_info(hwnd: HWND, proc_name: &str, clas
                 || class_name == "Shell_TrayWnd" 
                 || class_name == "SecondaryTrayWnd" 
             {
-                is_system_shell = true;
+                is_background_or_taskbar = true;
             }
         } else if proc_name == "startmenuexperiencehost.exe" 
             || proc_name == "searchhost.exe" 
             || proc_name == "shellexperiencehost.exe" 
             || proc_name == "applicationframehost.exe"
         {
-            is_system_shell = true;
+            is_start_menu_or_search = true;
         }
 
-        if is_system_shell {
-            // Keysor가 마우스 모드 중이라면 쉘 윈도우 포그라운드로 인해 커서가 숨겨지지 않도록 함
+        if is_start_menu_or_search {
+            // 시작 메뉴, 윈도우 검색창 등 시스템 핵심 시작 쉘이 포그라운드일 때는
+            // 마우스 모드 여부와 관계없이 항상 시스템 기본 커서를 복원해 보여줍니다.
+            return true;
+        }
+
+        if is_background_or_taskbar {
+            // 바탕화면이나 작업표시줄이 포그라운드일 때는
+            // Keysor가 마우스 모드 중이라면 기본 커서 은폐를 계속 유지하고(false 리턴),
+            // 마우스 모드가 아닐 때만 복원합니다.
             if let Some(state_arc) = crate::hook::APP_STATE.get() {
                 if let Ok(state) = state_arc.try_lock() {
                     if state.is_mouse_mode {
@@ -2358,6 +2397,7 @@ pub fn update_indicator_position() {
 
 
 
+#[allow(dead_code)]
 pub unsafe fn is_process_uiaccess_active() -> bool {
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
     use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_QUERY, TokenUIAccess};
