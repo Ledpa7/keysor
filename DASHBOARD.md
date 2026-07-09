@@ -23,9 +23,29 @@
 - [x] **3단계: C:\Program Files\Keysor 배포 자동화**: 신뢰할 수 있는 경로에서 UIAccess를 기동하기 위해 설치 폴더 복사 및 바탕화면 바로가기 타깃 갱신.
 - [ ] **4단계: 실조작 테스트**: 시작 메뉴 위에서 가려짐 없이 마우스 모드 커서 렌더링 유지 여부 검증.
 
+## 📅 최신 패치 및 수정 내역 (Latest Updates - 2026-07-09)
+
+- **[x] 고해상도(DPI) 환경 팝업창 글씨 흐림 및 경계선 잘림 버그 해결 (High DPI Blur & Border Clipping Fix)**:
+  - `src/main.rs` [MODIFY]: `SetProcessDPIAware()` 활성화를 통해 Windows OS의 강제 비트맵 확대(Bitmap stretching)를 중단하여 텍스트 및 UI의 픽셀 선명도를 100% (Pixel-perfect) 회복했습니다.
+  - `src/ui/win_gdi.rs` [MODIFY]: GDI 매핑 모드 `MM_ANISOTROPIC` 및 `SetWindowExtEx`/`SetViewportExtEx`를 도입하여 기존 `808x452` 논리 레이아웃 좌표들이 현재 모니터의 DPI 스케일(125%, 150% 등)에 맞춰 비트맵 버퍼상에 자동 비례 확대 렌더링되게 구성했습니다.
+  - `src/ui/win_gdi.rs` [MODIFY]: 메모리 DC 버퍼를 화면으로 전송(`BitBlt`)하기 직전에 매핑 모드를 `MM_TEXT`로 원복하여, 팝업창 우측 경계면이 윈도우 영역 밖으로 이중 스케일링되어 검은 빈 여백으로 깨지거나 잘려 나가던 치명적인 렌더링 버그를 원천 해결했습니다.
+  - `src/ui/win_gdi.rs` [MODIFY]: 라이선스 입력 다이얼로그와 자식 컨트롤(STATIC, EDIT, BUTTON) 및 인디케이터 오버레이 창의 크기/위치를 실시간 DPI 배율에 연동하여 동적으로 확대되도록 교정했습니다.
+  - `src/ui/win_gdi.rs` [MODIFY]: 마우스 이동(`WM_MOUSEMOVE`) 및 클릭(`WM_LBUTTONDOWN`) 메시지 핸들러에서 마우스 물리 좌표를 DPI 배율로 나누어(역산) `classify_hit_target` 함수에 전달함으로써 버튼의 물리적 마우스 포인터 감지 영역이 어긋나지 않도록 교정했습니다.
+- **[x] HUD 팝업창 조작 버튼 내 텍스트 정중앙 정렬 보정 (HUD Button Center Alignment)**:
+  - `src/ui/win_gdi.rs` [MODIFY]: `+`, `-`, `X`, minimize 버튼을 그릴 때 GDI 텍스트 정렬 속성을 `37` (`DT_CENTER | DT_VCENTER | DT_SINGLELINE`)로 일치시켜 수직/수평 네이티브 정중앙 정렬을 보완했습니다.
+  - `src/ui/win_gdi.rs` [MODIFY]: 폰트 글리프 자체의 물리적 치우침을 보정하기 위해 감도 감소(`-`) 버튼에는 `-3`, 감도 증가(`+`) 버튼에는 `-4` 오프셋을 미세 적용하여 기호들이 시각적으로 완벽한 센터 높이에 위치하도록 디테일을 개선했습니다.
+- **[x] 키서 커서 GDI+ 그라데이션 반복 방식 수정 및 그라데이션 복구 (Gradient WrapMode Bug Fix)**:
+  - `src/ui/win_gdi.rs` [MODIFY]: 기존 가상 커서 그라데이션 브러시 생성에 잘못 사용된 `WrapModeClamp` (4)는 GDI+ `LinearGradientBrush` 사양상 지원되지 않아 브러시 생성 실패(Invalid Parameter)를 야기하고, 이로 인해 커서 색상이 완전히 빠지던 현상을 발견했습니다.
+  - 이를 GDI+ 선형 그라데이션에서 정식 지원하며 경계 영역을 대칭 미러링 처리하는 `WrapModeTileFlipXY` (3)로 수정하여, 커서 고유의 선명한 초록색 그라데이션 색상을 정상 복원하면서 우측 하단 끝단 선 둥근 캡(Round Cap)에 맺히던 형광색 도트 노출 버그를 원천 해결했습니다.
+- **[x] Alt+Tab 및 Win+Tab(작업 보기) 창 전환 쉘 진입 시 기본 시스템 커서 강제 복원 기능 보완**:
+  - `src/ui/win_gdi.rs` [MODIFY]: 창 전환 쉘 오버레이 화면 작동 시 키서 가상 커서와 기본 커서가 모두 숨겨져 마우스 포인터가 일시적으로 아예 보이지 않던 치명적 은폐 현상을 해결했습니다.
+  - 포그라운드 윈도우 스캔 시 Alt+Tab 및 Task View 스위처 클래스들(`XamlExplorerHostIslandWindow`, `ForegroundStaging`, `MultitaskingViewFrame`)을 특수 시스템 쉘 영역으로 감지하여 키서 은폐 동작을 즉시 중단(Suspend)하고 기본 마우스 커서를 정상 노출시키도록 로직을 보완했습니다.
+- **[x] R, F 키 continuous 마우스 스크롤 반응성 및 한계 속도 2배 상향**:
+  - `src/hook.rs` [MODIFY]: R(Scroll Up) 및 F(Scroll Down) 키를 꾹 눌러 스크롤할 때의 기본 연속 휠 속도를 기존 초당 3 notches(`360.0` delta/sec)에서 **초당 6 notches**(`720.0` delta/sec)로, 한계 최대 스크롤 속도를 초당 30 notches(`3600.0` delta/sec)에서 **초당 60 notches**(`7200.0` delta/sec)로 2배 상향 조정하여 긴 웹페이지 탐색 시의 편의성을 개선했습니다. 가속 계수(`accel_factor`)도 `1.5`에서 `2.0`으로 증가시켜 가속 반응 속도도 높였습니다.
+
 ---
 
-## 📅 최신 패치 및 수정 내역 (Latest Updates - 2026-07-08)
+## 📅 이전 패치 및 수정 내역 (Previous Updates - 2026-07-08)
 
 - **[x] 홈페이지 헤더 "Go Pro" 결제 유도 버튼 추가 및 다국어 지원**:
   - `homepage/index.html` [MODIFY]: 공식 홈페이지 상단 네비게이션 헤더의 언어 선택기 좌측에 Lemon Squeezy 결제 페이지로 직결되는 **"Buy Pro" (결제하기)** 버튼을 신설하여 유료 에디션 전환 동선을 강화했습니다.

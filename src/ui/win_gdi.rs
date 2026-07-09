@@ -9,7 +9,8 @@ use windows_sys::Win32::Graphics::Gdi::{
     InvalidateRect, UpdateWindow, RoundRect, SetTextColor, SetBkMode, DrawTextW,
     CreateFontW, GetDC, ReleaseDC, CreateCompatibleDC, CreateDIBSection, DeleteDC,
     BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, AC_SRC_OVER, AC_SRC_ALPHA,
-    CreateCompatibleBitmap, BitBlt, SRCCOPY
+    CreateCompatibleBitmap, BitBlt, SRCCOPY, SetMapMode, SetWindowExtEx, SetViewportExtEx,
+    MM_ANISOTROPIC, MM_TEXT
 };
 use windows_sys::Win32::Graphics::GdiPlus::{
     GdiplusStartup, GdiplusStartupInput,
@@ -117,12 +118,18 @@ unsafe extern "system" fn input_dialog_proc(
             } else {
                 "발급받으신 Keysor Pro 라이선스 키를 입력해주세요:"
             };
+            let scale = crate::platform::get_system_controller().get_dpi_scale();
+
+            // Static text
             CreateWindowExW(
                 0,
                 encode_wide("STATIC").as_ptr(),
                 encode_wide(static_text).as_ptr(),
                 WS_CHILD | WS_VISIBLE,
-                20, 20, 380, 25,
+                (20.0 * scale) as i32,
+                (20.0 * scale) as i32,
+                (380.0 * scale) as i32,
+                (25.0 * scale) as i32,
                 hwnd,
                 0,
                 GetModuleHandleW(std::ptr::null()),
@@ -136,7 +143,10 @@ unsafe extern "system" fn input_dialog_proc(
                 encode_wide("EDIT").as_ptr(),
                 encode_wide("").as_ptr(),
                 WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL as u32,
-                20, 50, 380, 25,
+                (20.0 * scale) as i32,
+                (50.0 * scale) as i32,
+                (380.0 * scale) as i32,
+                (25.0 * scale) as i32,
                 hwnd,
                 201,
                 GetModuleHandleW(std::ptr::null()),
@@ -151,7 +161,10 @@ unsafe extern "system" fn input_dialog_proc(
                 encode_wide("BUTTON").as_ptr(),
                 encode_wide(ok_text).as_ptr(),
                 WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON as u32,
-                200, 90, 90, 30,
+                (200.0 * scale) as i32,
+                (90.0 * scale) as i32,
+                (90.0 * scale) as i32,
+                (30.0 * scale) as i32,
                 hwnd,
                 101,
                 GetModuleHandleW(std::ptr::null()),
@@ -165,7 +178,10 @@ unsafe extern "system" fn input_dialog_proc(
                 encode_wide("BUTTON").as_ptr(),
                 encode_wide(cancel_text).as_ptr(),
                 WS_CHILD | WS_VISIBLE,
-                310, 90, 90, 30,
+                (310.0 * scale) as i32,
+                (90.0 * scale) as i32,
+                (90.0 * scale) as i32,
+                (30.0 * scale) as i32,
                 hwnd,
                 102,
                 GetModuleHandleW(std::ptr::null()),
@@ -258,10 +274,11 @@ fn prompt_license_input(parent_hwnd: HWND, lang_en: bool) {
         }
 
         // Center on screen
+        let scale = crate::platform::get_system_controller().get_dpi_scale();
         let screen_w = GetSystemMetrics(0);
         let screen_h = GetSystemMetrics(1);
-        let dlg_w = 440;
-        let dlg_h = 180;
+        let dlg_w = (440.0 * scale) as i32;
+        let dlg_h = (180.0 * scale) as i32;
         let dlg_x = (screen_w - dlg_w) / 2;
         let dlg_y = (screen_h - dlg_h) / 2;
 
@@ -746,7 +763,7 @@ fn update_indicator_layered_image(hwnd: HWND) {
                 let p1 = PointF { X: 16.0, Y: 16.0 };
                 let p2 = PointF { X: 16.0 + 14.0 * scale_val, Y: 16.0 + 11.0 * scale_val };
                 let mut brush = std::ptr::null_mut();
-                if GdipCreateLineBrush(&p1, &p2, start_color, end_color, 0, &mut brush) == 0 {
+                if GdipCreateLineBrush(&p1, &p2, start_color, end_color, 3, &mut brush) == 0 {
                     let mut gradient_pen = std::ptr::null_mut();
                     if GdipCreatePen2(brush, 2.5, 2, &mut gradient_pen) == 0 {
                         GdipSetPenStartCap(gradient_pen, 2); // LineCapRound = 2
@@ -1069,13 +1086,18 @@ unsafe extern "system" fn hud_wnd_proc(
                 let h_bm = CreateCompatibleBitmap(hdc_paint, width, height);
                 let old_bm = SelectObject(hdc, h_bm);
 
+                // Set GDI mapping mode to automatically scale the 808x452 design coordinates
+                SetMapMode(hdc, MM_ANISOTROPIC);
+                SetWindowExtEx(hdc, 808, 452, std::ptr::null_mut());
+                SetViewportExtEx(hdc, width, height, std::ptr::null_mut());
+
                 let bg_brush = CreateSolidBrush(0x121210);
                 let border_pen = CreatePen(0, 2, 0xADFF2F);
                 
                 let old_brush = SelectObject(hdc, bg_brush);
                 let old_pen = SelectObject(hdc, border_pen);
                 
-                RoundRect(hdc, 0, 0, width, height, 16, 16);
+                RoundRect(hdc, 0, 0, 808, 452, 16, 16);
                 
                 SetBkMode(hdc, 1);
                 
@@ -1209,7 +1231,7 @@ unsafe extern "system" fn hud_wnd_proc(
                 } else {
                     (0x202424, 0x3C4040, 0x888888)
                 };
-                draw_hud_button(hdc, 742, 10, 767, 30, 6, min_bg, min_border, min_text_color, "-", fonts.title, 1 | 32, -3);
+                draw_hud_button(hdc, 742, 10, 767, 30, 6, min_bg, min_border, min_text_color, "-", fonts.title, 37, 0);
 
                 // Draw Close Button
                 let (close_bg, close_border, close_text_color) = if hover_val == 2 {
@@ -1217,7 +1239,7 @@ unsafe extern "system" fn hud_wnd_proc(
                 } else {
                     (0x202424, 0x3C4040, 0x888888)
                 };
-                draw_hud_button(hdc, 773, 10, 798, 30, 6, close_bg, close_border, close_text_color, "X", fonts.key, 1 | 32, 0);
+                draw_hud_button(hdc, 773, 10, 798, 30, 6, close_bg, close_border, close_text_color, "X", fonts.key, 37, 0);
                 
                 // Row 1: Numbers (Y = 80)
                 draw_key_cap(hdc, fonts.key, 30, 80, 48, 48, "~", "", 0);
@@ -1380,7 +1402,7 @@ unsafe extern "system" fn hud_wnd_proc(
                 } else {
                     (0x202424, 0x3C4040, 0x888888)
                 };
-                draw_hud_button(hdc, 658, 170, 698, 202, 6, dec_bg, dec_border, dec_text_color, "-", fonts.number, 1 | 32, -8);
+                draw_hud_button(hdc, 658, 170, 698, 202, 6, dec_bg, dec_border, dec_text_color, "-", fonts.title, 37, -3);
 
                 // Draw [+] Button
                 let (inc_bg, inc_border, inc_text_color) = if !(is_pro || is_trial) {
@@ -1390,7 +1412,7 @@ unsafe extern "system" fn hud_wnd_proc(
                 } else {
                     (0x202424, 0x3C4040, 0x888888)
                 };
-                draw_hud_button(hdc, 718, 170, 758, 202, 6, inc_bg, inc_border, inc_text_color, "+", fonts.title, 1 | 32, -1);
+                draw_hud_button(hdc, 718, 170, 758, 202, 6, inc_bg, inc_border, inc_text_color, "+", fonts.title, 37, -4);
 
                 // Draw Pixel Mode Toggle Button
                 let (pm_bg, pm_border, pm_text_color) = if !(is_pro || is_trial) {
@@ -1497,6 +1519,9 @@ unsafe extern "system" fn hud_wnd_proc(
                 DeleteObject(bg_brush);
                 DeleteObject(border_pen);
 
+                // Restore memory DC mapping mode to MM_TEXT to copy pixels 1:1 without void stretching
+                SetMapMode(hdc, MM_TEXT);
+
                 // Double Buffering: Copy offscreen bitmap to screen DC, and delete compatibility objects
                 BitBlt(hdc_paint, 0, 0, width, height, hdc, 0, 0, SRCCOPY);
                 SelectObject(hdc, old_bm);
@@ -1511,6 +1536,10 @@ unsafe extern "system" fn hud_wnd_proc(
                 let x = (lparam & 0xFFFF) as i16;
                 let y = ((lparam >> 16) & 0xFFFF) as i16;
                 
+                let scale = crate::platform::get_system_controller().get_dpi_scale();
+                let lx = (x as f64 / scale) as i16;
+                let ly = (y as f64 / scale) as i16;
+                
                 let (is_pro, is_trial) = {
                     let state_arc = crate::hook::APP_STATE.get();
                     state_arc.map_or((false, false), |arc| {
@@ -1519,7 +1548,7 @@ unsafe extern "system" fn hud_wnd_proc(
                     })
                 };
                 let prev_hover = HUD_HOVER.load(Ordering::SeqCst);
-                let hit = classify_hit_target(x, y, is_pro || is_trial, is_pro);
+                let hit = classify_hit_target(lx, ly, is_pro || is_trial, is_pro);
                 let new_hover = hit as u32;
                 
                 if new_hover != prev_hover {
@@ -1548,6 +1577,10 @@ unsafe extern "system" fn hud_wnd_proc(
                 let x = (lparam & 0xFFFF) as i16;
                 let y = ((lparam >> 16) & 0xFFFF) as i16;
                 
+                let scale = crate::platform::get_system_controller().get_dpi_scale();
+                let lx = (x as f64 / scale) as i16;
+                let ly = (y as f64 / scale) as i16;
+
                 let (is_pro, is_trial) = {
                     let state_arc = crate::hook::APP_STATE.get();
                     state_arc.map_or((false, false), |arc| {
@@ -1560,7 +1593,7 @@ unsafe extern "system" fn hud_wnd_proc(
                     state_arc.map_or(false, |arc| arc.lock().unwrap().config.settings.lang_en.unwrap_or(false))
                 };
                 
-                let hit = classify_hit_target(x, y, is_pro || is_trial, is_pro);
+                let hit = classify_hit_target(lx, ly, is_pro || is_trial, is_pro);
                 match hit {
                     HudHitTarget::Minimize => {
                         if let Some(&main_hwnd) = MAIN_HWND.get() {
@@ -1796,6 +1829,8 @@ pub fn start_indicator() {
         }
 
         // 5. Create Indicator Window
+        let scale = crate::platform::get_system_controller().get_dpi_scale();
+        let indicator_size = (32.0 * scale) as i32;
         let hwnd = CreateWindowExW(
             WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
             class_name_wide.as_ptr(),
@@ -1803,8 +1838,8 @@ pub fn start_indicator() {
             WS_POPUP,
             0,
             0,
-            32, // width
-            32, // height
+            indicator_size, // width
+            indicator_size, // height
             0,
             0,
             instance,
@@ -1826,8 +1861,8 @@ pub fn start_indicator() {
         let screen_width = GetSystemMetrics(0); // SM_CXSCREEN
         let screen_height = GetSystemMetrics(1); // SM_CYSCREEN
         
-        let hud_w = 808;
-        let hud_h = 452;
+        let hud_w = (808.0 * scale) as i32;
+        let hud_h = (452.0 * scale) as i32;
         let hud_x = (screen_width - hud_w) / 2;
         let hud_y = (screen_height - hud_h) / 2;
 
@@ -2064,6 +2099,11 @@ unsafe fn is_system_shell_foreground_with_info(hwnd: HWND, proc_name: &str, clas
                 || class_name == "SecondaryTrayWnd" 
             {
                 is_background_or_taskbar = true;
+            } else if class_name == "XamlExplorerHostIslandWindow" 
+                || class_name == "ForegroundStaging" 
+                || class_name == "MultitaskingViewFrame" 
+            {
+                is_start_menu_or_search = true;
             }
         } else if proc_name == "startmenuexperiencehost.exe" 
             || proc_name == "searchhost.exe" 

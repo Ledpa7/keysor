@@ -292,10 +292,10 @@ fn process_mouse_scrolling(
         if elapsed >= 0.200 {
             let scroll_elapsed = elapsed - 0.200;
             
-            let base_scroll = 360.0; // 초당 3 notches (360 delta/sec)
-            let max_scroll = 3600.0; // 초당 30 notches (3600 delta/sec)
-            let accel_factor = 1.5;
-            let speed = (base_scroll + scroll_elapsed * accel_factor * 400.0).min(max_scroll);
+            let base_scroll = 720.0; // 초당 6 notches (720 delta/sec)
+            let max_scroll = 7200.0; // 초당 60 notches (7200 delta/sec)
+            let accel_factor = 2.0;
+            let speed = (base_scroll + scroll_elapsed * accel_factor * 600.0).min(max_scroll);
             
             let scroll_amount_y = speed * params.sdy * dt + *remainder_scroll_y;
             let scroll_amount_x = speed * params.sdx * dt + *remainder_scroll_x;
