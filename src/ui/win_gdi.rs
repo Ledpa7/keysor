@@ -17,7 +17,8 @@ use windows_sys::Win32::Graphics::GdiPlus::{
     GdipCreateFromHDC, GdipDeleteGraphics, GdipSetSmoothingMode,
     GdipCreatePen1, GdipDeletePen, GdipDrawLineI, SmoothingModeAntiAlias,
     GdipSetPenStartCap, GdipSetPenEndCap, GdipSetPenLineJoin,
-    GdipCreateLineBrush, GdipCreatePen2, GdipDeleteBrush, PointF
+    GdipCreateLineBrush, GdipCreatePen2, GdipDeleteBrush, PointF,
+    GdipScaleWorldTransform
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     RegisterClassW, CreateWindowExW, DefWindowProcW, ShowWindow, SetWindowPos, MSG,
@@ -659,8 +660,9 @@ pub fn trigger_click_motion(click_type: ClickType) {
 
 fn update_indicator_layered_image(hwnd: HWND) {
     unsafe {
-        let width = 32;
-        let height = 32;
+        let dpi_scale = crate::platform::get_system_controller().get_dpi_scale();
+        let width = (32.0 * dpi_scale) as i32;
+        let height = (32.0 * dpi_scale) as i32;
 
         let scale_val = if let Some(scale_lock) = CLICK_SCALE.get() {
             if let Ok(scale) = scale_lock.lock() {
@@ -707,10 +709,11 @@ fn update_indicator_layered_image(hwnd: HWND) {
             let mut graphics = std::ptr::null_mut();
             if GdipCreateFromHDC(hdc_mem, &mut graphics) == 0 {
                 GdipSetSmoothingMode(graphics, SmoothingModeAntiAlias);
+                GdipScaleWorldTransform(graphics, dpi_scale as f32, dpi_scale as f32, 0);
 
                 // 1. Draw high-contrast black border first (4.0px width)
                 let mut black_pen = std::ptr::null_mut();
-                if GdipCreatePen1(0xFF000000, 4.0, 2, &mut black_pen) == 0 {
+                if GdipCreatePen1(0xFF000000, 4.0, 0, &mut black_pen) == 0 {
                     GdipSetPenStartCap(black_pen, 2); // LineCapRound = 2
                     GdipSetPenEndCap(black_pen, 2);   // LineCapRound = 2
                     GdipSetPenLineJoin(black_pen, 2);  // LineJoinRound = 2
@@ -765,7 +768,7 @@ fn update_indicator_layered_image(hwnd: HWND) {
                 let mut brush = std::ptr::null_mut();
                 if GdipCreateLineBrush(&p1, &p2, start_color, end_color, 3, &mut brush) == 0 {
                     let mut gradient_pen = std::ptr::null_mut();
-                    if GdipCreatePen2(brush, 2.5, 2, &mut gradient_pen) == 0 {
+                    if GdipCreatePen2(brush, 2.5, 0, &mut gradient_pen) == 0 {
                         GdipSetPenStartCap(gradient_pen, 2); // LineCapRound = 2
                         GdipSetPenEndCap(gradient_pen, 2);   // LineCapRound = 2
                         GdipSetPenLineJoin(gradient_pen, 2);  // LineJoinRound = 2

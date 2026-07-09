@@ -10,6 +10,8 @@ use crate::ui::win_gdi::{
     HUD_HWND, INDICATOR_HWND, MAIN_HWND, HUD_LAST_SNAPPED, FORCE_UIA_REFRESH
 };
 
+type EscapedCooldownState = Option<((i32, i32), std::time::Instant)>;
+
 // =========================================================================
 // 자석 모드 및 전역 UIA 점프/이탈 누적 연산 엔진 (시각적 잔상 피드백 적용)
 // =========================================================================
@@ -222,28 +224,29 @@ pub fn check_magnetic_snapping() {
                     }
                 }
                 
-                if should_release && new_dir.is_some() {
-                    let dir = new_dir.as_ref().unwrap();
-                    let last_jump = LAST_JUMP_TIME.get_or_init(|| Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(5)));
-                    let mut can_jump = false;
-                    if let Ok(lj) = last_jump.try_lock() {
-                        if lj.elapsed() >= std::time::Duration::from_millis(cooldown_limit) {
-                            can_jump = true;
-                        }
-                    }
-                    
-                    if can_jump {
-                        if let Some(&(_, sx, sy)) = targets.iter().find(|&&(id, _, _)| id == last_id) {
-                            let target_screen_x = hud_rect.left + sx;
-                            let target_screen_y = hud_rect.top + sy;
-                            let hud_screen_targets: Vec<(i32, i32)> = targets.iter()
-                                .map(|&(_, tx, ty)| (hud_rect.left + tx, hud_rect.top + ty))
-                                .collect();
-                            
-                            if let Some((jx, jy)) = find_adjacent_target(target_screen_x, target_screen_y, dir, &hud_screen_targets) {
-                                if let Some(&(jid, _, _)) = targets.iter().find(|&&(_, tx, ty)| {
-                                    hud_rect.left + tx == jx && hud_rect.top + ty == jy
-                                }) {
+                if should_release {
+                    if let Some(dir) = new_dir.as_ref() {
+                        let last_jump = LAST_JUMP_TIME.get_or_init(|| Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(5)));
+                        let can_jump = last_jump.try_lock()
+                            .map(|lj| lj.elapsed() >= std::time::Duration::from_millis(cooldown_limit))
+                            .unwrap_or(false);
+                        
+                        if can_jump {
+                            if let Some(&(_, sx, sy)) = targets.iter().find(|&&(id, _, _)| id == last_id) {
+                                let target_screen_x = hud_rect.left + sx;
+                                let target_screen_y = hud_rect.top + sy;
+                                let hud_screen_targets: Vec<(i32, i32)> = targets.iter()
+                                    .map(|&(_, tx, ty)| (hud_rect.left + tx, hud_rect.top + ty))
+                                    .collect();
+                                
+                                let snap_target = find_adjacent_target(target_screen_x, target_screen_y, dir, &hud_screen_targets)
+                                    .and_then(|(jx, jy)| {
+                                        targets.iter().find(|&&(_, tx, ty)| {
+                                            hud_rect.left + tx == jx && hud_rect.top + ty == jy
+                                        }).map(|&(jid, _, _)| (jx, jy, jid))
+                                    });
+                                
+                                if let Some((jx, jy, jid)) = snap_target {
                                     windows_sys::Win32::UI::WindowsAndMessaging::SetCursorPos(jx, jy);
                                     HUD_LAST_SNAPPED.store(jid, std::sync::atomic::Ordering::SeqCst);
                                     HUD_LANDED.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -267,13 +270,10 @@ pub fn check_magnetic_snapping() {
                     let target_screen_y = hud_rect.top + ty;
                     
                     if should_release {
-                        let mut cooldown_active = false;
                         let last_jump = LAST_JUMP_TIME.get_or_init(|| Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(5)));
-                        if let Ok(lj) = last_jump.try_lock() {
-                            if lj.elapsed() < std::time::Duration::from_millis(cooldown_limit) {
-                                cooldown_active = true;
-                            }
-                        }
+                        let cooldown_active = last_jump.try_lock()
+                            .map(|lj| lj.elapsed() < std::time::Duration::from_millis(cooldown_limit))
+                            .unwrap_or(false);
                         
                         if cooldown_active {
                             *accum = 0.0;
@@ -310,10 +310,8 @@ pub fn check_magnetic_snapping() {
                             }
                             windows_sys::Win32::UI::WindowsAndMessaging::SetCursorPos(target_screen_x + push_dx, target_screen_y + push_dy);
                             
-                            if let Some(state_arc) = crate::hook::APP_STATE.get() {
-                                if let Ok(mut state) = state_arc.try_lock() {
-                                    state.movement_start_time = Some(std::time::Instant::now());
-                                }
+                            if let Some(Ok(mut state)) = crate::hook::APP_STATE.get().map(|arc| arc.try_lock()) {
+                                state.movement_start_time = Some(std::time::Instant::now());
                             }
                             return;
                         } else {
@@ -370,10 +368,10 @@ pub fn check_magnetic_snapping() {
             let cooldown = cooldown_lock.lock().unwrap();
             
             for &(id, tx, ty) in &targets {
-                if let Some((cooldown_id, escaped_time)) = *cooldown {
-                    if id == cooldown_id && escaped_time.elapsed() < std::time::Duration::from_millis(200) {
-                        continue;
-                    }
+                if cooldown.map_or(false, |(cooldown_id, escaped_time)| {
+                    id == cooldown_id && escaped_time.elapsed() < std::time::Duration::from_millis(200)
+                }) {
+                    continue;
                 }
                 
                 let target_screen_x = hud_rect.left + tx;
@@ -407,7 +405,6 @@ pub fn check_magnetic_snapping() {
 }
 
 fn scan_titlebar_targets(
-    automation: &UIAutomation,
     element: &uiautomation::core::UIElement,
     win_rect: &RECT,
     true_cond: &uiautomation::core::UICondition,
@@ -422,7 +419,7 @@ fn scan_titlebar_targets(
     let mut should_traverse = true;
     
     if let Ok(rect) = element.get_bounding_rectangle() {
-        let top = rect.get_top() as i32;
+        let top = rect.get_top();
         
         // 만약 엘리먼트의 상단이 타이틀바 영역(win_rect.top + 100)보다 아래에 있다면 하위 탐색 중단 및 프루닝
         if top > win_rect.top + 100 {
@@ -445,19 +442,22 @@ fn scan_titlebar_targets(
         }
     }
     
-    if should_traverse {
-        if let Ok(children) = element.find_all(uiautomation::types::TreeScope::Children, true_cond) {
-            for child in &children {
-                scan_titlebar_targets(
-                    automation,
-                    child,
-                    win_rect,
-                    true_cond,
-                    clickable_types,
-                    depth + 1,
-                    results,
-                );
-            }
+    let children_opt = if should_traverse {
+        element.find_all(uiautomation::types::TreeScope::Children, true_cond).ok()
+    } else {
+        None
+    };
+
+    if let Some(children) = children_opt {
+        for child in &children {
+            scan_titlebar_targets(
+                child,
+                win_rect,
+                true_cond,
+                clickable_types,
+                depth + 1,
+                results,
+            );
         }
     }
 }
@@ -612,7 +612,6 @@ pub fn start_global_targets_thread() {
                 if is_heavy {
                     if let Ok(true_cond) = automation.create_true_condition() {
                         scan_titlebar_targets(
-                            &automation,
                             &element,
                             &win_rect,
                             &true_cond,
@@ -630,10 +629,10 @@ pub fn start_global_targets_thread() {
                 let mut new_targets = Vec::new();
                 for el in &elements {
                     if let Ok(rect) = el.get_bounding_rectangle() {
-                        let left = rect.get_left() as i32;
-                        let top = rect.get_top() as i32;
-                        let right = rect.get_right() as i32;
-                        let bottom = rect.get_bottom() as i32;
+                        let left = rect.get_left();
+                        let top = rect.get_top();
+                        let right = rect.get_right();
+                        let bottom = rect.get_bottom();
                         let w = right - left;
                         let h = bottom - top;
                         
@@ -657,14 +656,12 @@ pub fn start_global_targets_thread() {
                                             is_valid = true;
                                         }
                                     }
-                                    if !is_valid {
-                                        if let Ok(name) = el.get_name() {
-                                            let name_lower = name.to_lowercase();
-                                            if name_lower.contains("최소화") || name_lower.contains("최대화") || name_lower.contains("닫기") || name_lower.contains("복원") ||
-                                               name_lower.contains("minimize") || name_lower.contains("maximize") || name_lower.contains("close") || name_lower.contains("restore") {
-                                                is_valid = true;
-                                            }
-                                        }
+                                    if !is_valid && el.get_name().map(|name| {
+                                        let name_lower = name.to_lowercase();
+                                        name_lower.contains("최소화") || name_lower.contains("최대화") || name_lower.contains("닫기") || name_lower.contains("복원") ||
+                                        name_lower.contains("minimize") || name_lower.contains("maximize") || name_lower.contains("close") || name_lower.contains("restore")
+                                    }).unwrap_or(false) {
+                                        is_valid = true;
                                     }
                                 }
                             }
@@ -705,10 +702,8 @@ pub fn check_global_magnetic_snapping() {
     });
     
     if !enabled || !is_mouse_mode || is_dragging || !features_enabled {
-        if let Some(lock) = LAST_GLOBAL_SNAPPED_POS.get() {
-            if let Ok(mut pos) = lock.lock() {
-                *pos = None;
-            }
+        if let Some(Ok(mut pos)) = LAST_GLOBAL_SNAPPED_POS.get().map(|lock| lock.lock()) {
+            *pos = None;
         }
         return;
     }
@@ -721,7 +716,7 @@ pub fn check_global_magnetic_snapping() {
     let snap_threshold = 25.0;
     let release_threshold = 15.0;
     
-    static ESCAPED_COOLDOWN: OnceLock<Mutex<Option<((i32, i32), std::time::Instant)>>> = OnceLock::new();
+    static ESCAPED_COOLDOWN: OnceLock<Mutex<EscapedCooldownState>> = OnceLock::new();
     
     let last_snapped_lock = LAST_GLOBAL_SNAPPED_POS.get_or_init(|| Mutex::new(None));
     let mut last_pos = last_snapped_lock.lock().unwrap();
@@ -746,20 +741,19 @@ pub fn check_global_magnetic_snapping() {
             }
         }
         
-        if should_release && new_dir.is_some() {
-            let dir = new_dir.as_ref().unwrap();
-            let last_jump = LAST_JUMP_TIME.get_or_init(|| Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(5)));
-            let mut can_jump = false;
-            if let Ok(lj) = last_jump.try_lock() {
-                if lj.elapsed() >= std::time::Duration::from_millis(cooldown_limit) {
-                    can_jump = true;
-                }
-            }
-            
-            if can_jump {
-                let targets_lock = GLOBAL_SNAP_TARGETS.get();
-                if let Some(mutex) = targets_lock {
-                    let targets = mutex.lock().unwrap();
+        if should_release {
+            if let Some(dir) = new_dir.as_ref() {
+                let last_jump = LAST_JUMP_TIME.get_or_init(|| Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(5)));
+                let can_jump = last_jump.try_lock()
+                    .map(|lj| lj.elapsed() >= std::time::Duration::from_millis(cooldown_limit))
+                    .unwrap_or(false);
+                
+                if can_jump {
+                    let targets = GLOBAL_SNAP_TARGETS.get()
+                        .and_then(|mutex| mutex.lock().ok())
+                        .map(|t| t.clone())
+                        .unwrap_or_default();
+                    
                     let res = find_adjacent_target(sx, sy, dir, &targets);
                     log_debug(&format!("find_adjacent_target: sx={}, sy={}, dir={}, num_targets={}, result={:?}", sx, sy, dir, targets.len(), res));
                     if let Some((jx, jy)) = res {
@@ -782,13 +776,10 @@ pub fn check_global_magnetic_snapping() {
         }
         
         if should_release {
-            let mut cooldown_active = false;
             let last_jump = LAST_JUMP_TIME.get_or_init(|| Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(5)));
-            if let Ok(lj) = last_jump.try_lock() {
-                if lj.elapsed() < std::time::Duration::from_millis(cooldown_limit) {
-                    cooldown_active = true;
-                }
-            }
+            let cooldown_active = last_jump.try_lock()
+                .map(|lj| lj.elapsed() < std::time::Duration::from_millis(cooldown_limit))
+                .unwrap_or(false);
             
             if cooldown_active {
                 *accum = 0.0;
@@ -827,10 +818,8 @@ pub fn check_global_magnetic_snapping() {
                     windows_sys::Win32::UI::WindowsAndMessaging::SetCursorPos(sx + push_dx, sy + push_dy);
                 }
                 
-                if let Some(state_arc) = crate::hook::APP_STATE.get() {
-                    if let Ok(mut state) = state_arc.try_lock() {
-                        state.movement_start_time = Some(std::time::Instant::now());
-                    }
+                if let Some(Ok(mut state)) = crate::hook::APP_STATE.get().map(|arc| arc.try_lock()) {
+                    state.movement_start_time = Some(std::time::Instant::now());
                 }
                 return;
             } else {
@@ -882,34 +871,36 @@ pub fn check_global_magnetic_snapping() {
         }
     }
     
-    let targets_lock = GLOBAL_SNAP_TARGETS.get();
-    if let Some(mutex) = targets_lock {
-        let targets = mutex.lock().unwrap();
-        let mut best_dist = f64::MAX;
-        let mut best_target = (0, 0);
-        
-        let cooldown_lock = ESCAPED_COOLDOWN.get_or_init(|| Mutex::new(None));
-        let cooldown = cooldown_lock.lock().unwrap();
-        
-        for &(tx, ty) in targets.iter() {
-            if let Some(((ex, ey), escaped_time)) = *cooldown {
-                let dx_cooldown = tx - ex;
-                let dy_cooldown = ty - ey;
-                let dist_cooldown = ((dx_cooldown * dx_cooldown + dy_cooldown * dy_cooldown) as f64).sqrt();
-                if dist_cooldown < 35.0 && escaped_time.elapsed() < std::time::Duration::from_millis(350) {
-                    continue;
-                }
-            }
-            
-            let dx = cursor_pt.x - tx;
-            let dy = cursor_pt.y - ty;
-            let dist = ((dx * dx + dy * dy) as f64).sqrt();
-            
-            if dist < snap_threshold && dist < best_dist {
-                best_dist = dist;
-                best_target = (tx, ty);
+    let targets = GLOBAL_SNAP_TARGETS.get()
+        .and_then(|mutex| mutex.lock().ok())
+        .map(|t| t.clone())
+        .unwrap_or_default();
+
+    let mut best_dist = f64::MAX;
+    let mut best_target = (0, 0);
+    
+    let cooldown_lock = ESCAPED_COOLDOWN.get_or_init(|| Mutex::new(None));
+    let cooldown = cooldown_lock.lock().unwrap();
+    
+    for &(tx, ty) in targets.iter() {
+        if let Some(((ex, ey), escaped_time)) = *cooldown {
+            let dx_cooldown = tx - ex;
+            let dy_cooldown = ty - ey;
+            let dist_cooldown = ((dx_cooldown * dx_cooldown + dy_cooldown * dy_cooldown) as f64).sqrt();
+            if dist_cooldown < 35.0 && escaped_time.elapsed() < std::time::Duration::from_millis(350) {
+                continue;
             }
         }
+        
+        let dx = cursor_pt.x - tx;
+        let dy = cursor_pt.y - ty;
+        let dist = ((dx * dx + dy * dy) as f64).sqrt();
+        
+        if dist < snap_threshold && dist < best_dist {
+            best_dist = dist;
+            best_target = (tx, ty);
+        }
+    }
         
         if best_dist < snap_threshold {
             log_debug(&format!("Snapped to target: ({}, {}) dist={}", best_target.0, best_target.1, best_dist));
@@ -926,28 +917,20 @@ pub fn check_global_magnetic_snapping() {
                 *lj = std::time::Instant::now();
             }
         }
-    }
 }
 
 pub fn is_currently_snapped() -> bool {
     let hud_snapped = HUD_LAST_SNAPPED.load(std::sync::atomic::Ordering::SeqCst) != 0;
-    let global_snapped = if let Some(lock) = LAST_GLOBAL_SNAPPED_POS.get() {
-        if let Ok(pos) = lock.lock() {
-            pos.is_some()
-        } else {
-            false
-        }
-    } else {
-        false
-    };
+    let global_snapped = LAST_GLOBAL_SNAPPED_POS.get()
+        .and_then(|lock| lock.lock().ok())
+        .map(|pos| pos.is_some())
+        .unwrap_or(false);
     hud_snapped || global_snapped
 }
 
 pub fn clear_magnetic_snapping() {
     HUD_LAST_SNAPPED.store(0, std::sync::atomic::Ordering::SeqCst);
-    if let Some(lock) = LAST_GLOBAL_SNAPPED_POS.get() {
-        if let Ok(mut pos) = lock.lock() {
-            *pos = None;
-        }
+    if let Some(Ok(mut pos)) = LAST_GLOBAL_SNAPPED_POS.get().map(|lock| lock.lock()) {
+        *pos = None;
     }
 }

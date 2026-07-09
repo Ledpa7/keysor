@@ -73,10 +73,9 @@ fn main() {
     }
 
     // 3. 설정 파일에 라이선스 키가 있고 로컬 인증이 안 된 경우 백그라운드 자동 활성화 구동
-    if let Some(ref lic_key) = config.settings.license_key {
-        if !lic_key.trim().is_empty() && !license::check_local_license() {
-            license::start_auto_activation_worker(lic_key.clone());
-        }
+    if let Some(lic_key) = config.settings.license_key.as_ref()
+        .filter(|key| !key.trim().is_empty() && !license::check_local_license()) {
+        license::start_auto_activation_worker(lic_key.clone());
     }
     // 3-1. 14일 실시간 백그라운드 라이선스 만료 감지 스케줄러 시작
     license::start_license_verification_scheduler();
@@ -104,16 +103,15 @@ fn main() {
         hook::modifier_sync_guard();
 
         // B. keysor.yaml 변경 감지 핫리로드 처리
-        if let Ok(current_modified) = get_modified_time(&config_path) {
-            if current_modified != last_modified {
-                last_modified = current_modified;
-                println!("[Hot-Reload] keysor.yaml change detected. Reloading configuration...");
-                
-                let new_config = config::load_config(&config_path);
-                if let Some(state_arc) = hook::APP_STATE.get() {
-                    let mut state = state_arc.lock().unwrap();
-                    state.reload_configuration(new_config);
-                }
+        if let Some(current_modified) = get_modified_time(&config_path).ok()
+            .filter(|&modified| modified != last_modified) {
+            last_modified = current_modified;
+            println!("[Hot-Reload] keysor.yaml change detected. Reloading configuration...");
+            
+            let new_config = config::load_config(&config_path);
+            if let Some(state_arc) = hook::APP_STATE.get() {
+                let mut state = state_arc.lock().unwrap();
+                state.reload_configuration(new_config);
             }
         }
     }

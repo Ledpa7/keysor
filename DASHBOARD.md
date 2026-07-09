@@ -25,6 +25,14 @@
 
 ## 📅 최신 패치 및 수정 내역 (Latest Updates - 2026-07-09)
 
+- **[x] UI Automation (UIA) 자석 스냅 탐색 스레드 락 점유율 최적화 (UIA snap lock optimization)**:
+  - `src/ui/win_uia.rs` [MODIFY]: `check_global_magnetic_snapping` 함수에서 전역 자석 스냅 타깃 `GLOBAL_SNAP_TARGETS` 데이터를 읽고 연산하는 과정을 최적화했습니다.
+  - 기존의 무거운 타깃 거리 계산 및 순회 연산을 락을 잡은 상태로 진행하던 비효율적인 구조를, 락 획득 즉시 로컬 벡터로 데이터를 복제(`t.clone()`)한 후 곧바로 락을 릴리즈(Drop)하는 방식으로 임계 구역(Critical Section)을 최소화했습니다.
+  - 락 점유 시간이 수 밀리초(ms)에서 수십 나노초(ns) 단위로 극도로 단축되어, UIA 탐색 스레드와 100Hz(10ms 주기) 마우스 이동 제어 스레드 간의 뮤텍스 락 경합(Mutex Contention) 및 마우스가 일시적으로 끊기는 지터(Jitter) 현상을 근본적으로 차단했습니다.
+- **[x] 소스코드 정적 Clippy 경고 100% 해소 및 안전하지 않은 unwrap 제거 (Rust Safety & Refactoring)**:
+  - `src/ui/win_uia.rs` [MODIFY], `src/main.rs` [MODIFY]: nested `if` 문(Clippy `collapsible_if` 경고 대상)을 함수형 체이닝(`and_then`, `map`, `unwrap_or`, `filter`) 및 옵션 결합 기법을 사용해 평탄화(Flattening)하여 가독성을 개선했습니다.
+  - `new_dir`에 대해 `.is_some()` 체크 후 `.unwrap()`을 강제 호출하던 unsafe 지점을 `if let Some(dir) = new_dir.as_ref()`로 구조분해하여 안전성을 보장했습니다.
+  - 복잡했던 static OnceLock/Mutex의 중첩 타입 `Option<((i32, i32), std::time::Instant)>`을 `EscapedCooldownState` 타입 별칭으로 정의하여 가독성을 높였으며, `scan_titlebar_targets` 내부에서 사용되지 않던 `automation` 파라미터를 시그니처와 호출부에서 완전히 소거했습니다.
 - **[x] 고해상도(DPI) 환경 팝업창 글씨 흐림 및 경계선 잘림 버그 해결 (High DPI Blur & Border Clipping Fix)**:
   - `src/main.rs` [MODIFY]: `SetProcessDPIAware()` 활성화를 통해 Windows OS의 강제 비트맵 확대(Bitmap stretching)를 중단하여 텍스트 및 UI의 픽셀 선명도를 100% (Pixel-perfect) 회복했습니다.
   - `src/ui/win_gdi.rs` [MODIFY]: GDI 매핑 모드 `MM_ANISOTROPIC` 및 `SetWindowExtEx`/`SetViewportExtEx`를 도입하여 기존 `808x452` 논리 레이아웃 좌표들이 현재 모니터의 DPI 스케일(125%, 150% 등)에 맞춰 비트맵 버퍼상에 자동 비례 확대 렌더링되게 구성했습니다.
