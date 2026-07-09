@@ -25,6 +25,11 @@
 
 ## 📅 최신 패치 및 수정 내역 (Latest Updates - 2026-07-09)
 
+- **[x] 고해상도(DPI) 환경 인디케이터(가상 커서) 크기 및 선 두께 비율 오류 해결 (DPI Cursor Scaling & Pen Width Fix)**:
+  - `src/ui/win_gdi.rs` [MODIFY]: DPI 스케일에 맞춰 인디케이터 윈도우 크기는 커졌으나, 내부 비트맵 해상도가 `32x32`로 고정되고 GDI+ 그리기 시 배율 변환이 없어 커서가 상대적으로 축소/잘림 렌더링되던 버그를 해결했습니다.
+  - 비트맵 생성 규격을 DPI 배율에 연동한 `(32.0 * dpi_scale)` 동적 해상도로 확장하고, GDI+ `GdipScaleWorldTransform`을 추가하여 가상 좌표 기반 드로잉들을 화면에 완벽하게 스케일업했습니다.
+  - GDI+ 펜 생성(`GdipCreatePen1`, `GdipCreatePen2`) 시 사용되던 단위 설정을 `UnitPixel` (2)에서 `UnitWorld` (0)로 전면 전환하여, 커서 외형 크기가 확대될 때 검은 테두리와 그라데이션 선의 두께도 동일하게 두꺼워지도록 수정함으로써 기존 키서 고유의 비주얼 정체성을 고화질로 온전히 유지했습니다.
+
 - **[x] UI Automation (UIA) 자석 스냅 탐색 스레드 락 점유율 최적화 (UIA snap lock optimization)**:
   - `src/ui/win_uia.rs` [MODIFY]: `check_global_magnetic_snapping` 함수에서 전역 자석 스냅 타깃 `GLOBAL_SNAP_TARGETS` 데이터를 읽고 연산하는 과정을 최적화했습니다.
   - 기존의 무거운 타깃 거리 계산 및 순회 연산을 락을 잡은 상태로 진행하던 비효율적인 구조를, 락 획득 즉시 로컬 벡터로 데이터를 복제(`t.clone()`)한 후 곧바로 락을 릴리즈(Drop)하는 방식으로 임계 구역(Critical Section)을 최소화했습니다.
