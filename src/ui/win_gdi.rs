@@ -2251,8 +2251,9 @@ fn calculate_interpolated_pos() -> (f64, f64) {
         windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt);
     }
     
-    let target_x = (pt.x - 16) as f64;
-    let target_y = (pt.y - 16) as f64;
+    let dpi_scale = crate::platform::get_system_controller().get_dpi_scale();
+    let target_x = pt.x as f64 - 16.0 * dpi_scale;
+    let target_y = pt.y as f64 - 16.0 * dpi_scale;
     
     let pos_lock = CUR_INDICATOR_POS.get_or_init(|| Mutex::new(None));
     let mut pos = pos_lock.lock().unwrap();

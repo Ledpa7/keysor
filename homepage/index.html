@@ -227,9 +227,10 @@
     </div>
 
     <!-- Live HUD Preview Section -->
-    <div class="w-full overflow-x-auto flex flex-col items-center mb-16 no-scrollbar pb-2">
-      <!-- HUD Desktop Window Replica -->
-      <div id="hud-window" class="relative w-[808px] h-[452px] min-w-[808px] bg-[#121210] rounded-2xl border-2 border-[#2FFFAD] shadow-[0_0_30px_rgba(47,255,173,0.15)] text-slate-300 font-sans select-none overflow-hidden transition-all duration-300">
+    <div id="hud-container" class="w-full overflow-hidden flex flex-col items-center mb-16 no-scrollbar pb-2 relative">
+      <div id="hud-scaler" class="origin-top transition-transform duration-200">
+        <!-- HUD Desktop Window Replica -->
+        <div id="hud-window" class="relative w-[808px] h-[452px] min-w-[808px] bg-[#121210] rounded-2xl border-2 border-[#2FFFAD] shadow-[0_0_30px_rgba(47,255,173,0.15)] text-slate-300 font-sans select-none overflow-hidden transition-all duration-300">
         
         <!-- Title Bar -->
         <div class="absolute left-[30px] top-[26px] right-[30px] h-[34px] flex items-center justify-between">
@@ -413,6 +414,7 @@
 
       </div>
     </div>
+  </div>
 
     <div class="border border-slate-800 rounded-2xl bg-slate-950/40 backdrop-blur-sm overflow-hidden shadow-xl">
       <table class="w-full text-left border-collapse">

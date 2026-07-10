@@ -658,6 +658,29 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // Mobile scaling for HUD
+  const hudContainer = document.getElementById('hud-container');
+  const hudScaler = document.getElementById('hud-scaler');
+
+  function resizeHud() {
+    if (!hudContainer || !hudScaler) return;
+    const containerWidth = hudContainer.clientWidth;
+    const baseWidth = 808;
+    const baseHeight = 452;
+
+    if (containerWidth < baseWidth) {
+      const scale = containerWidth / baseWidth;
+      hudScaler.style.transform = `scale(${scale})`;
+      hudContainer.style.height = `${baseHeight * scale}px`;
+    } else {
+      hudScaler.style.transform = 'none';
+      hudContainer.style.height = 'auto';
+    }
+  }
+
+  window.addEventListener('resize', resizeHud);
+
   // Initialize
   updateHudUI();
+  resizeHud();
 });
