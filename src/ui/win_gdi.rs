@@ -45,6 +45,7 @@ pub static IS_INPUTTING_LICENSE: std::sync::atomic::AtomicBool = std::sync::atom
 pub static SUSPEND_CURSOR_HIDE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub static FORCE_UIA_REFRESH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static CUR_INDICATOR_POS: OnceLock<Mutex<Option<(f64, f64)>>> = OnceLock::new();
+static BLANK_CURSOR: OnceLock<windows_sys::Win32::UI::WindowsAndMessaging::HCURSOR> = OnceLock::new();
 
 use crate::ui::{KeysorUi, ClickType};
 
@@ -102,6 +103,11 @@ fn encode_wide(s: &str) -> Vec<u16> {
 static LICENSE_INPUT_RESULT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static INPUT_DIALOG_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static IS_LANG_EN_GLOBAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+static SENS_INPUT_RESULT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static SENS_INPUT_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static SENS_INPUT_LABEL: OnceLock<Mutex<String>> = OnceLock::new();
+static SENS_INPUT_INITIAL: OnceLock<Mutex<String>> = OnceLock::new();
 
 unsafe extern "system" fn input_dialog_proc(
     hwnd: HWND,
@@ -388,6 +394,340 @@ fn prompt_license_input(parent_hwnd: HWND, lang_en: bool) {
                         }
                     }
                 });
+            }
+        }
+    });
+}
+
+unsafe extern "system" fn sens_input_dialog_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    match msg {
+        WM_CREATE => {
+            let label = SENS_INPUT_LABEL.get().and_then(|m| m.lock().ok()).map(|s| s.clone()).unwrap_or_default();
+            let initial = SENS_INPUT_INITIAL.get().and_then(|m| m.lock().ok()).map(|s| s.clone()).unwrap_or_default();
+            let scale = crate::platform::get_system_controller().get_dpi_scale();
+
+            // Label text
+            CreateWindowExW(
+                0,
+                encode_wide("STATIC").as_ptr(),
+                encode_wide(&label).as_ptr(),
+                WS_CHILD | WS_VISIBLE,
+                (20.0 * scale) as i32,
+                (20.0 * scale) as i32,
+                (380.0 * scale) as i32,
+                (25.0 * scale) as i32,
+                hwnd,
+                0,
+                GetModuleHandleW(std::ptr::null()),
+                std::ptr::null(),
+            );
+
+            // Edit control (input text box)
+            let edit_hwnd = CreateWindowExW(
+                WS_EX_CLIENTEDGE,
+                encode_wide("EDIT").as_ptr(),
+                encode_wide(&initial).as_ptr(),
+                WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL as u32,
+                (20.0 * scale) as i32,
+                (50.0 * scale) as i32,
+                (380.0 * scale) as i32,
+                (25.0 * scale) as i32,
+                hwnd,
+                201,
+                GetModuleHandleW(std::ptr::null()),
+                std::ptr::null(),
+            );
+            windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(edit_hwnd);
+            windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW(edit_hwnd, 0x00B1, 0, -1);
+
+            // OK Button (ID = 101)
+            let ok_text = if IS_LANG_EN_GLOBAL.load(Ordering::SeqCst) { "OK" } else { "확인" };
+            CreateWindowExW(
+                0,
+                encode_wide("BUTTON").as_ptr(),
+                encode_wide(ok_text).as_ptr(),
+                WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON as u32,
+                (200.0 * scale) as i32,
+                (90.0 * scale) as i32,
+                (90.0 * scale) as i32,
+                (30.0 * scale) as i32,
+                hwnd,
+                101,
+                GetModuleHandleW(std::ptr::null()),
+                std::ptr::null(),
+            );
+
+            // Cancel Button (ID = 102)
+            let cancel_text = if IS_LANG_EN_GLOBAL.load(Ordering::SeqCst) { "Cancel" } else { "취소" };
+            CreateWindowExW(
+                0,
+                encode_wide("BUTTON").as_ptr(),
+                encode_wide(cancel_text).as_ptr(),
+                WS_CHILD | WS_VISIBLE,
+                (310.0 * scale) as i32,
+                (90.0 * scale) as i32,
+                (90.0 * scale) as i32,
+                (30.0 * scale) as i32,
+                hwnd,
+                102,
+                GetModuleHandleW(std::ptr::null()),
+                std::ptr::null(),
+            );
+            0
+        }
+        WM_COMMAND => {
+            let wm_id = wparam & 0xFFFF;
+            if wm_id == 101 { // OK
+                let edit_hwnd = GetDlgItem(hwnd, 201);
+                let mut buffer = [0u16; 512];
+                let len = GetWindowTextW(edit_hwnd, buffer.as_mut_ptr(), 512);
+                let input_str = if len > 0 {
+                    String::from_utf16_lossy(&buffer[..len as usize]).trim().to_string()
+                } else {
+                    "".to_string()
+                };
+                if let Some(lock) = SENS_INPUT_RESULT.get() {
+                    if let Ok(mut res) = lock.lock() {
+                        *res = Some(input_str);
+                    }
+                }
+                SENS_INPUT_ACTIVE.store(false, Ordering::SeqCst);
+                DestroyWindow(hwnd);
+            } else if wm_id == 102 { // Cancel
+                if let Some(lock) = SENS_INPUT_RESULT.get() {
+                    if let Ok(mut res) = lock.lock() {
+                        *res = None;
+                    }
+                }
+                SENS_INPUT_ACTIVE.store(false, Ordering::SeqCst);
+                DestroyWindow(hwnd);
+            }
+            0
+        }
+        WM_CLOSE => {
+            if let Some(lock) = SENS_INPUT_RESULT.get() {
+                if let Ok(mut res) = lock.lock() {
+                    *res = None;
+                }
+            }
+            SENS_INPUT_ACTIVE.store(false, Ordering::SeqCst);
+            DestroyWindow(hwnd);
+            0
+        }
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
+fn prompt_sens_value_input(parent_hwnd: HWND, target: HudHitTarget, lang_en: bool) {
+    IS_LANG_EN_GLOBAL.store(lang_en, Ordering::SeqCst);
+
+    if let Some(&hud) = HUD_HWND.get() {
+        unsafe {
+            ShowWindow(hud, SW_HIDE);
+            crate::ui::win_uia::clear_magnetic_snapping();
+        }
+    }
+
+    let (label, initial_val) = match target {
+        HudHitTarget::EditBaseSpeed => {
+            let val = crate::hook::APP_STATE.get().map_or(1.5, |arc| arc.lock().unwrap().config.settings.base_speed);
+            let lbl = if lang_en {
+                "Enter new Base Speed (0.1 ~ 100.0):"
+            } else {
+                "새로운 마우스 시작 속도를 입력하세요 (0.1 ~ 100.0):"
+            };
+            (lbl.to_string(), format!("{:.1}", val))
+        }
+        HudHitTarget::EditMaxSpeed => {
+            let val = crate::hook::APP_STATE.get().map_or(30.0, |arc| arc.lock().unwrap().config.settings.max_speed);
+            let lbl = if lang_en {
+                "Enter new Max Speed (0.1 ~ 100.0):"
+            } else {
+                "새로운 마우스 최대 속도를 입력하세요 (0.1 ~ 100.0):"
+            };
+            (lbl.to_string(), format!("{:.1}", val))
+        }
+        HudHitTarget::EditAcceleration => {
+            let val = crate::hook::APP_STATE.get().map_or(1.5, |arc| arc.lock().unwrap().config.settings.acceleration);
+            let lbl = if lang_en {
+                "Enter new Acceleration (0.1 ~ 10.0):"
+            } else {
+                "새로운 마우스 가속도를 입력하세요 (0.1 ~ 10.0):"
+            };
+            (lbl.to_string(), format!("{:.1}", val))
+        }
+        _ => return,
+    };
+
+    if let Some(lock) = SENS_INPUT_LABEL.get_or_init(|| Mutex::new(String::new())).lock().ok() {
+        let mut s = lock;
+        *s = label;
+    }
+    if let Some(lock) = SENS_INPUT_INITIAL.get_or_init(|| Mutex::new(String::new())).lock().ok() {
+        let mut s = lock;
+        *s = initial_val;
+    }
+
+    thread::spawn(move || unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+        
+        let instance = GetModuleHandleW(std::ptr::null());
+        let class_name = encode_wide("KeysorSensInputDlgClass");
+        
+        static REGISTER_ONCE: std::sync::Once = std::sync::Once::new();
+        REGISTER_ONCE.call_once(|| {
+            let dlg_class = WNDCLASSW {
+                style: CS_HREDRAW | CS_VREDRAW,
+                lpfnWndProc: Some(sens_input_dialog_proc),
+                cbClsExtra: 0,
+                cbWndExtra: 0,
+                hInstance: instance,
+                hIcon: 0,
+                hCursor: LoadCursorW(0 as _, 32512 as *const u16),
+                hbrBackground: 6 as _, // COLOR_WINDOW + 1
+                lpszMenuName: std::ptr::null(),
+                lpszClassName: class_name.as_ptr(),
+            };
+            RegisterClassW(&dlg_class);
+        });
+
+        let result_lock = SENS_INPUT_RESULT.get_or_init(|| Mutex::new(None));
+        if let Ok(mut res) = result_lock.lock() {
+            *res = None;
+        }
+
+        let scale = crate::platform::get_system_controller().get_dpi_scale();
+        let screen_w = GetSystemMetrics(0);
+        let screen_h = GetSystemMetrics(1);
+        let dlg_w = (440.0 * scale) as i32;
+        let dlg_h = (180.0 * scale) as i32;
+        let dlg_x = (screen_w - dlg_w) / 2;
+        let dlg_y = (screen_h - dlg_h) / 2;
+
+        let title = if lang_en {
+            "Edit Sensitivity Value"
+        } else {
+            "감도 설정 수정"
+        };
+
+        if let Some(&hud) = HUD_HWND.get() {
+            windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(hud, 0);
+        }
+
+        let dlg_hwnd = CreateWindowExW(
+            WS_EX_TOPMOST,
+            class_name.as_ptr(),
+            encode_wide(title).as_ptr(),
+            WS_POPUP | WS_CAPTION | WS_SYSMENU,
+            dlg_x, dlg_y, dlg_w, dlg_h,
+            parent_hwnd,
+            0,
+            instance,
+            std::ptr::null(),
+        );
+
+        if dlg_hwnd != 0 {
+            ShowWindow(dlg_hwnd, SW_SHOW);
+            UpdateWindow(dlg_hwnd);
+            SENS_INPUT_ACTIVE.store(true, Ordering::SeqCst);
+            
+            let mut msg: MSG = std::mem::zeroed();
+            while SENS_INPUT_ACTIVE.load(Ordering::SeqCst) && GetMessageW(&mut msg, 0, 0, 0) > 0 {
+                if IsDialogMessageW(dlg_hwnd, &msg) == 0 {
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+        }
+
+        if let Some(&hud) = HUD_HWND.get() {
+            windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(hud, 1);
+            ShowWindow(hud, SW_SHOWNA);
+            windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(hud);
+        }
+
+        let val_opt = {
+            if let Ok(res) = result_lock.lock() {
+                res.clone()
+            } else {
+                None
+            }
+        };
+
+        if let Some(val_str) = val_opt {
+            if let Ok(parsed_val) = val_str.parse::<f64>() {
+                let mut config_to_save = None;
+                let mut is_valid = false;
+                
+                match target {
+                    HudHitTarget::EditBaseSpeed => {
+                        if parsed_val >= 0.1 && parsed_val <= 100.0 {
+                            if let Some(state_arc) = crate::hook::APP_STATE.get() {
+                                if let Ok(mut state) = state_arc.lock() {
+                                    state.config.settings.base_speed = parsed_val;
+                                    config_to_save = Some(state.config.clone());
+                                    is_valid = true;
+                                }
+                            }
+                        }
+                    }
+                    HudHitTarget::EditMaxSpeed => {
+                        if parsed_val >= 0.1 && parsed_val <= 100.0 {
+                            if let Some(state_arc) = crate::hook::APP_STATE.get() {
+                                if let Ok(mut state) = state_arc.lock() {
+                                    state.config.settings.max_speed = parsed_val;
+                                    config_to_save = Some(state.config.clone());
+                                    is_valid = true;
+                                }
+                            }
+                        }
+                    }
+                    HudHitTarget::EditAcceleration => {
+                        if parsed_val >= 0.1 && parsed_val <= 10.0 {
+                            if let Some(state_arc) = crate::hook::APP_STATE.get() {
+                                if let Ok(mut state) = state_arc.lock() {
+                                    state.config.settings.acceleration = parsed_val;
+                                    config_to_save = Some(state.config.clone());
+                                    is_valid = true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+
+                if is_valid {
+                    if let Some(cfg) = config_to_save {
+                        crate::config::save_config(&cfg);
+                    }
+                    if let Some(&hud) = HUD_HWND.get() {
+                        InvalidateRect(hud, std::ptr::null(), 0);
+                    }
+                } else {
+                    let err_msg = if lang_en {
+                        "Invalid value range."
+                    } else {
+                        "허용 범위를 벗어난 값입니다."
+                    };
+                    let err_title = if lang_en { "Input Error" } else { "입력 오류" };
+                    MessageBoxW(parent_hwnd, encode_wide(err_msg).as_ptr(), encode_wide(err_title).as_ptr(), 0x10);
+                }
+            } else {
+                let err_msg = if lang_en {
+                    "Please enter a valid number."
+                } else {
+                    "올바른 숫자를 입력해 주세요."
+                };
+                let err_title = if lang_en { "Input Error" } else { "입력 오류" };
+                MessageBoxW(parent_hwnd, encode_wide(err_msg).as_ptr(), encode_wide(err_title).as_ptr(), 0x10);
             }
         }
     });
@@ -898,6 +1238,9 @@ enum HudHitTarget {
     ToggleDetail = 8,
     BuyProTop = 10,
     LicenseTop = 11,
+    EditBaseSpeed = 12,
+    EditMaxSpeed = 13,
+    EditAcceleration = 14,
 }
 
 fn classify_hit_target(x: i16, y: i16, features_enabled: bool, is_pro: bool) -> HudHitTarget {
@@ -906,6 +1249,19 @@ fn classify_hit_target(x: i16, y: i16, features_enabled: bool, is_pro: bool) -> 
             return HudHitTarget::ToggleMagnet;
         }
     }
+
+    if SHOW_ALL_SENS.load(Ordering::SeqCst) && features_enabled {
+        if x >= 653 && x <= 773 {
+            if y >= 114 && y <= 132 {
+                return HudHitTarget::EditBaseSpeed;
+            } else if y >= 132 && y <= 150 {
+                return HudHitTarget::EditMaxSpeed;
+            } else if y >= 150 && y <= 168 {
+                return HudHitTarget::EditAcceleration;
+            }
+        }
+    }
+
     if y >= 10 && y <= 30 {
         if x >= 773 && x <= 798 {
             return HudHitTarget::Close;
@@ -1617,7 +1973,8 @@ unsafe extern "system" fn hud_wnd_proc(
                         toggle_language();
                         InvalidateRect(hwnd, std::ptr::null(), 0);
                     }
-                    HudHitTarget::DecSensitivity | HudHitTarget::IncSensitivity | HudHitTarget::TogglePixelMode | HudHitTarget::ToggleMagnet | HudHitTarget::ToggleDetail => {
+                    HudHitTarget::DecSensitivity | HudHitTarget::IncSensitivity | HudHitTarget::TogglePixelMode | HudHitTarget::ToggleMagnet | HudHitTarget::ToggleDetail
+                    | HudHitTarget::EditBaseSpeed | HudHitTarget::EditMaxSpeed | HudHitTarget::EditAcceleration => {
                         if !(is_pro || is_trial) {
                             let msg_text = if lang_en {
                                 "This feature is only available in Keysor Pro.\n\nWould you like to purchase a Pro license?"
@@ -1654,6 +2011,9 @@ unsafe extern "system" fn hud_wnd_proc(
                                 HudHitTarget::ToggleDetail => {
                                     let prev = SHOW_ALL_SENS.load(Ordering::SeqCst);
                                     SHOW_ALL_SENS.store(!prev, Ordering::SeqCst);
+                                }
+                                HudHitTarget::EditBaseSpeed | HudHitTarget::EditMaxSpeed | HudHitTarget::EditAcceleration => {
+                                    prompt_sens_value_input(hwnd, hit, lang_en);
                                 }
                                 _ => {}
                             }
@@ -1919,27 +2279,10 @@ fn hide_system_cursor_internal() {
     // 일반 PC 환경에서 키서 모드 실행 시 기본 마우스 커서와 키서 가상 커서가 동시 노출/잔상이 남는 문제를
     // 해결하기 위해 시스템 기본 커서들을 전역적으로 투명하게 은폐하는 로직을 복원합니다.
     unsafe {
-        let and_mask: [u8; 128] = [0xFF; 128];
-        let xor_mask: [u8; 128] = [0x00; 128];
-
-        let cursor_ids = [
-            32512, // OCR_NORMAL
-            32513, // OCR_IBEAM
-            32514, // OCR_WAIT
-            32515, // OCR_CROSS
-            32516, // OCR_UP
-            32642, // OCR_SIZENWSE
-            32643, // OCR_SIZENESW
-            32644, // OCR_SIZEWE
-            32645, // OCR_SIZENS
-            32646, // OCR_SIZEALL
-            32648, // OCR_NO
-            32649, // OCR_HAND
-            32650, // OCR_APPSTARTING
-        ];
-
-        for &id in &cursor_ids {
-            let blank = windows_sys::Win32::UI::WindowsAndMessaging::CreateCursor(
+        let blank = *BLANK_CURSOR.get_or_init(|| {
+            let and_mask: [u8; 128] = [0xFF; 128];
+            let xor_mask: [u8; 128] = [0x00; 128];
+            windows_sys::Win32::UI::WindowsAndMessaging::CreateCursor(
                 0,
                 0,
                 0,
@@ -1947,9 +2290,31 @@ fn hide_system_cursor_internal() {
                 32,
                 and_mask.as_ptr() as *const _,
                 xor_mask.as_ptr() as *const _,
-            );
-            if blank != 0 {
-                windows_sys::Win32::UI::WindowsAndMessaging::SetSystemCursor(blank, id);
+            )
+        });
+
+        if blank != 0 {
+            let cursor_ids = [
+                32512, // OCR_NORMAL
+                32513, // OCR_IBEAM
+                32514, // OCR_WAIT
+                32515, // OCR_CROSS
+                32516, // OCR_UP
+                32642, // OCR_SIZENWSE
+                32643, // OCR_SIZENESW
+                32644, // OCR_SIZEWE
+                32645, // OCR_SIZENS
+                32646, // OCR_SIZEALL
+                32648, // OCR_NO
+                32649, // OCR_HAND
+                32650, // OCR_APPSTARTING
+            ];
+
+            for &id in &cursor_ids {
+                let blank_copy = windows_sys::Win32::UI::WindowsAndMessaging::CopyIcon(blank);
+                if blank_copy != 0 {
+                    windows_sys::Win32::UI::WindowsAndMessaging::SetSystemCursor(blank_copy, id);
+                }
             }
         }
     }

@@ -158,6 +158,43 @@ fn find_adjacent_target(
     best_target
 }
 
+fn get_dynamic_thresholds() -> (f64, f64) {
+    let mut pt = unsafe { std::mem::zeroed() };
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt);
+    }
+    let h_monitor = unsafe {
+        windows_sys::Win32::Graphics::Gdi::MonitorFromPoint(
+            pt,
+            windows_sys::Win32::Graphics::Gdi::MONITOR_DEFAULTTONEAREST,
+        )
+    };
+    let mut info: windows_sys::Win32::Graphics::Gdi::MONITORINFO = unsafe { std::mem::zeroed() };
+    info.cbSize = std::mem::size_of::<windows_sys::Win32::Graphics::Gdi::MONITORINFO>() as u32;
+    let monitor_width = unsafe {
+        if windows_sys::Win32::Graphics::Gdi::GetMonitorInfoW(h_monitor, &mut info) != 0 {
+            info.rcMonitor.right - info.rcMonitor.left
+        } else {
+            1920 // Fallback
+        }
+    };
+    
+    // keysor.yaml의 설정값 획득 (기본값 1.3)
+    let user_sensitivity = crate::hook::APP_STATE.get()
+        .map(|arc| arc.lock().unwrap().config.settings.magnetic_sensitivity.unwrap_or(1.3))
+        .unwrap_or(1.3);
+
+    // 1280 해상도 기준 1.0배, 1920 해상도 기준 user_sensitivity배가 되도록 선형 보정 (최소 1.0)
+    // 1920 - 1280 = 640 이므로, 640px 차이당 (user_sensitivity - 1.0)배씩 증가
+    let rate = (user_sensitivity - 1.0).max(0.0);
+    let res_scale = (1.0 + (monitor_width as f64 - 1280.0) / 640.0 * rate).max(1.0);
+    
+    let dpi_scale = crate::platform::get_system_controller().get_dpi_scale();
+    let final_scale = res_scale.max(dpi_scale);
+    
+    (25.0 * final_scale, 15.0 * final_scale)
+}
+
 pub fn check_magnetic_snapping() {
     let state_arc = crate::hook::APP_STATE.get();
     let (enabled, is_dragging, features_enabled) = state_arc.map_or((false, false, false), |arc| {
@@ -199,8 +236,7 @@ pub fn check_magnetic_snapping() {
             static HUD_LANDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
             static HUD_COOLDOWN: OnceLock<Mutex<Option<(u32, std::time::Instant)>>> = OnceLock::new();
             
-            let snap_threshold = 25.0;
-            let release_threshold = 15.0;
+            let (snap_threshold, release_threshold) = get_dynamic_thresholds();
             
             let last_id = HUD_LAST_SNAPPED.load(std::sync::atomic::Ordering::SeqCst);
             
@@ -707,14 +743,32 @@ pub fn check_global_magnetic_snapping() {
         }
         return;
     }
+
+    if let Some(&hud_hwnd) = HUD_HWND.get() {
+        unsafe {
+            if windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hud_hwnd) != 0 {
+                let mut hud_rect = std::mem::zeroed();
+                windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect(hud_hwnd, &mut hud_rect);
+                
+                let mut pt = std::mem::zeroed();
+                windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt);
+                
+                if pt.x >= hud_rect.left && pt.x <= hud_rect.right && pt.y >= hud_rect.top && pt.y <= hud_rect.bottom {
+                    if let Some(Ok(mut pos)) = LAST_GLOBAL_SNAPPED_POS.get().map(|lock| lock.lock()) {
+                        *pos = None;
+                    }
+                    return;
+                }
+            }
+        }
+    }
     
     let mut cursor_pt = unsafe { std::mem::zeroed() };
     unsafe {
         windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut cursor_pt);
     }
     
-    let snap_threshold = 25.0;
-    let release_threshold = 15.0;
+    let (snap_threshold, release_threshold) = get_dynamic_thresholds();
     
     static ESCAPED_COOLDOWN: OnceLock<Mutex<EscapedCooldownState>> = OnceLock::new();
     

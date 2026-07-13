@@ -22,6 +22,7 @@ pub struct MovementSettings {
     pub base_speed: f64,
     pub max_speed: f64,
     pub acceleration: f64,
+    pub shift_pressed: bool,
 }
 
 /// 마우스 스크롤 제어를 위해 추출한 설정 파라미터 구조체
@@ -96,6 +97,7 @@ impl AppState {
             base_speed,
             max_speed,
             acceleration,
+            shift_pressed: self.shift_pressed,
         })
     }
 
@@ -236,7 +238,10 @@ fn process_mouse_movement(
         };
         let elapsed = start_time.elapsed().as_secs_f64();
 
-        let speed = crate::math::calculate_speed(params.base_speed, elapsed, params.acceleration, params.max_speed);
+        let mut speed = crate::math::calculate_speed(params.base_speed, elapsed, params.acceleration, params.max_speed);
+        if params.shift_pressed {
+            speed /= 4.0;
+        }
         let (move_x, move_y) = crate::math::calculate_movement_delta(
             speed,
             params.dx,
@@ -337,6 +342,7 @@ fn start_movement_thread(state_ptr: Arc<Mutex<AppState>>) {
         let mut remainder_y = 0.0f64;
         let mut remainder_scroll_x = 0.0f64;
         let mut remainder_scroll_y = 0.0f64;
+        let mut was_mouse_mode = false;
         loop {
             thread::sleep(Duration::from_millis(interval_ms));
 
@@ -353,6 +359,12 @@ fn start_movement_thread(state_ptr: Arc<Mutex<AppState>>) {
                 crate::indicator::update_indicator_position();
                 crate::indicator::check_magnetic_snapping();
                 crate::indicator::check_global_magnetic_snapping();
+                was_mouse_mode = true;
+            } else {
+                if was_mouse_mode {
+                    crate::ui::win_gdi::force_restore_system_cursor();
+                    was_mouse_mode = false;
+                }
             }
 
             let safe_hz = hz.max(10).min(1000);

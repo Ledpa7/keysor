@@ -20,6 +20,7 @@ pub struct Settings {
     pub lang_en: Option<bool>,
     pub magnetic_mode: Option<bool>,
     pub global_magnetic_mode: Option<bool>,
+    pub magnetic_sensitivity: Option<f64>,
     pub license_key: Option<String>,
 }
 
@@ -52,6 +53,7 @@ impl Default for Config {
                 lang_en: Some(true),
                 magnetic_mode: Some(false),
                 global_magnetic_mode: Some(false),
+                magnetic_sensitivity: Some(1.3),
                 license_key: None,
             },
             bindings: vec![
@@ -103,6 +105,7 @@ settings:
   refresh_rate_hz: 100         # 이동 주기 주사율 (기본값 100Hz, 원격 접속 시 60으로 낮추면 부드러워짐)
   magnetic_mode: false         # 자석 모드 활성화 여부 (HUD 버튼에 마우스가 다가가면 흡착)
   global_magnetic_mode: false  # 전역 UI 자석 모드 활성화 여부 (윈도우 내의 모든 버튼 및 웹페이지 내 버튼/링크 흡착)
+  magnetic_sensitivity: 1.3    # 1920 해상도 등에서 적용할 자석 감도 스케일 배율 (기본값 1.3)
   lang_en: true                # 기본 언어 영어 설정 (true: 영어, false: 한국어)
   license_key: ""              # 프로 라이선스 키 (구입 후 발급받은 키 입력)
 
