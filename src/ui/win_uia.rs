@@ -222,6 +222,8 @@ pub fn check_magnetic_snapping() {
             let mut cursor_pt = std::mem::zeroed();
             windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut cursor_pt);
             
+            let scale = crate::platform::get_system_controller().get_dpi_scale();
+            
             let targets = [
                 (1, 687, 40),
                 (2, 754, 20),
@@ -269,16 +271,20 @@ pub fn check_magnetic_snapping() {
                         
                         if can_jump {
                             if let Some(&(_, sx, sy)) = targets.iter().find(|&&(id, _, _)| id == last_id) {
-                                let target_screen_x = hud_rect.left + sx;
-                                let target_screen_y = hud_rect.top + sy;
+                                let target_screen_x = hud_rect.left + (sx as f64 * scale).round() as i32;
+                                let target_screen_y = hud_rect.top + (sy as f64 * scale).round() as i32;
                                 let hud_screen_targets: Vec<(i32, i32)> = targets.iter()
-                                    .map(|&(_, tx, ty)| (hud_rect.left + tx, hud_rect.top + ty))
+                                    .map(|&(_, tx, ty)| (
+                                        hud_rect.left + (tx as f64 * scale).round() as i32,
+                                        hud_rect.top + (ty as f64 * scale).round() as i32
+                                    ))
                                     .collect();
                                 
                                 let snap_target = find_adjacent_target(target_screen_x, target_screen_y, dir, &hud_screen_targets)
                                     .and_then(|(jx, jy)| {
                                         targets.iter().find(|&&(_, tx, ty)| {
-                                            hud_rect.left + tx == jx && hud_rect.top + ty == jy
+                                            hud_rect.left + (tx as f64 * scale).round() as i32 == jx
+                                                && hud_rect.top + (ty as f64 * scale).round() as i32 == jy
                                         }).map(|&(jid, _, _)| (jx, jy, jid))
                                     });
                                 
@@ -302,8 +308,8 @@ pub fn check_magnetic_snapping() {
                 }
                 
                 if let Some(&(_, tx, ty)) = targets.iter().find(|&&(id, _, _)| id == last_id) {
-                    let target_screen_x = hud_rect.left + tx;
-                    let target_screen_y = hud_rect.top + ty;
+                    let target_screen_x = hud_rect.left + (tx as f64 * scale).round() as i32;
+                    let target_screen_y = hud_rect.top + (ty as f64 * scale).round() as i32;
                     
                     if should_release {
                         let last_jump = LAST_JUMP_TIME.get_or_init(|| Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(5)));
@@ -410,8 +416,8 @@ pub fn check_magnetic_snapping() {
                     continue;
                 }
                 
-                let target_screen_x = hud_rect.left + tx;
-                let target_screen_y = hud_rect.top + ty;
+                let target_screen_x = hud_rect.left + (tx as f64 * scale).round() as i32;
+                let target_screen_y = hud_rect.top + (ty as f64 * scale).round() as i32;
                 let dx = cursor_pt.x - target_screen_x;
                 let dy = cursor_pt.y - target_screen_y;
                 let dist = ((dx * dx + dy * dy) as f64).sqrt();
