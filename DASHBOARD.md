@@ -23,6 +23,18 @@
 - [x] **3단계: C:\Program Files\Keysor 배포 자동화**: 신뢰할 수 있는 경로에서 UIAccess를 기동하기 위해 설치 폴더 복사 및 바탕화면 바로가기 타깃 갱신.
 - [ ] **4단계: 실조작 테스트**: 시작 메뉴 위에서 가려짐 없이 마우스 모드 커서 렌더링 유지 여부 검증.
 
+## 📅 최신 패치 및 수정 내역 (Latest Updates - 2026-07-16)
+
+- **[x] 홈페이지 복구, 다국어 번역 모듈화 리팩토링 및 성능 최적화 (Homepage Refactoring & Event Optimizations)**:
+  - **강제 종료 문제 복구**: 리팩토링 중 강제 종료로 깨진 [main.js](file:///c:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/homepage/src/main.js) 코드를 직전 안정 버전(`f592055`)으로 원복 후 리팩토링을 재적용했습니다.
+  - **다국어 번역 모듈화**: `main.js` 내에 존재하던 300라인 상당의 번역 객체를 별도 모듈인 [translations.js](file:///c:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/homepage/src/translations.js)로 온전히 떼어내어 `import` 문을 통해 로드하도록 구조를 분리했습니다.
+  - **결제 안내 버튼 문구 반영**: 다국어 번역 파일 내 결제 유도 버튼 문구(`nav_buy_pro`)를 각각 영어(`$Buy Pro`), 한국어(`$결제하기`), 중국어(`$购买专业版`) 사양에 맞춰 동기화했습니다.
+  - **마우스 글로우 렌더링 최적화**: 마우스 위치에 반응하는 그리드 배경 글로우 구현을 위해 `mousemove` 리스너를 추가하되, 불필요한 레이아웃 스타일 재계산 병목을 예방하고자 `requestAnimationFrame` 기반 쓰로틀링(Throttling)을 적용했습니다.
+  - **윈도우 리사이즈 연산 최적화**: 윈도우 크기가 조정될 때 다량 유발되는 `resize` 이벤트를 `100ms` 지연 디바운싱(Debounce)하여 불필요한 HUD 레이아웃 조작 연산 및 리플로우 횟수를 획기적으로 낮췄습니다.
+  - **빌드 테스트 및 배포 연동**: Vite 배포 빌드(`npm run build`) 및 Rust 릴리즈 빌드(`cargo build --release`) 검증을 모두 정상 수행하여 배포 아티팩트를 갱신했습니다.
+
+---
+
 ## 📅 최신 패치 및 수정 내역 (Latest Updates - 2026-07-09)
 
 - **[x] 고해상도(DPI) 환경 인디케이터(가상 커서) 크기 및 선 두께 비율 오류 해결 (DPI Cursor Scaling & Pen Width Fix)**:
