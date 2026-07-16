@@ -22,14 +22,48 @@
     overflow-x: hidden;
     cursor: url('/cursor.svg') 16 16, auto;
   }
+  body {
+    isolation: isolate;
+  }
 }
 
-/* Custom Grid Background */
+/* Custom Grid Background Container */
+.grid-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: -20;
+  /* Vertical mask: fades out at the very top and very bottom of the document */
+  mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 1) 150px, rgba(0, 0, 0, 1) calc(100% - 150px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 1) 150px, rgba(0, 0, 0, 1) calc(100% - 150px), transparent 100%);
+}
+
+/* Custom Grid Background Lines */
 .grid-bg {
+  position: absolute;
+  inset: 0;
   background-image: 
     linear-gradient(to right, rgba(47, 255, 173, 0.05) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(47, 255, 173, 0.05) 1px, transparent 1px);
-  background-size: 40px 40px;
+  background-size: 30px 30px;
+  pointer-events: none;
+  /* Horizontal mask: fades out at the left and right margins of the viewport */
+  mask-image: linear-gradient(to right, transparent 0%, rgba(0, 0, 0, 1) 30%, rgba(0, 0, 0, 1) 70%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, rgba(0, 0, 0, 1) 30%, rgba(0, 0, 0, 1) 70%, transparent 100%);
+}
+
+/* Interactive Mouse Glow Grid Lines */
+.grid-bg-glow {
+  position: absolute;
+  inset: 0;
+  background-image: 
+    linear-gradient(to right, rgba(47, 255, 173, 0.75) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(47, 255, 173, 0.75) 1px, transparent 1px);
+  background-size: 30px 30px;
+  pointer-events: none;
+  /* Radial mask centered at the mouse cursor coordinates, fade to transparent at 200px */
+  mask-image: radial-gradient(circle 200px at var(--mouse-x, -9999px) var(--mouse-y, -9999px), rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0.2) 50%, transparent 100%);
+  -webkit-mask-image: radial-gradient(circle 200px at var(--mouse-x, -9999px) var(--mouse-y, -9999px), rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0.2) 50%, transparent 100%);
 }
 
 /* Glow Effects */
