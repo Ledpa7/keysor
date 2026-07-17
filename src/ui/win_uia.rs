@@ -370,7 +370,7 @@ pub fn check_magnetic_snapping() {
                             let dx = cursor_pt.x - target_screen_x;
                             let dy = cursor_pt.y - target_screen_y;
                             let dist = ((dx * dx + dy * dy) as f64).sqrt();
-                            if dist > 3.0 {
+                            if dist > release_threshold {
                                 HUD_LAST_SNAPPED.store(0, std::sync::atomic::Ordering::SeqCst);
                                 HUD_LANDED.store(false, std::sync::atomic::Ordering::SeqCst);
                                 let cooldown_lock = HUD_COOLDOWN.get_or_init(|| Mutex::new(None));
@@ -898,7 +898,7 @@ pub fn check_global_magnetic_snapping() {
                 let dx = cursor_pt.x - sx;
                 let dy = cursor_pt.y - sy;
                 let dist = ((dx * dx + dy * dy) as f64).sqrt();
-                if dist > 3.0 {
+                if dist > release_threshold {
                     *last_pos = None;
                     let cooldown_lock = ESCAPED_COOLDOWN.get_or_init(|| Mutex::new(None));
                     *cooldown_lock.lock().unwrap() = Some(((sx, sy), std::time::Instant::now()));
