@@ -13,6 +13,14 @@ const VK_E: u32 = 0x45;
 const VK_J: u32 = 0x4A;
 const VK_K: u32 = 0x4B;
 
+/// CapsLock 이벤트 처리 후 인디케이터에 전달할 액션
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IndicatorAction {
+    None,
+    Show,
+    Hide,
+}
+
 /// 마우스 이동 제어를 위해 추출한 설정 파라미터 구조체
 pub struct MovementSettings {
     pub dx: f64,
@@ -492,7 +500,7 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
     }
 
     let mut should_inject = false;
-    let mut action_to_take = 0; // 0: None, 1: Show, 2: Hide
+    let mut indicator_action = IndicatorAction::None;
 
     if let Some(state_arc) = APP_STATE.get() {
         let mut state = state_arc.lock().unwrap();
@@ -507,29 +515,39 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
             if should_process {
                 state.caps_lock_press_time = Some(Instant::now());
                 state.caps_lock_used_as_modifier = false;
-                
+
                 if is_toggle_mode {
-                    if state.is_mouse_mode {
+                    // CapsLock 현재 상태 읽기: keydown 직전이므로 현재값이 아직 변경 전
+                    // GetKeyState 하위 비트(0x0001): 토글 상태 (1=ON, 0=OFF)
+                    let caps_currently_on = unsafe {
+                        (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyState(0x14) & 0x0001) != 0
+                    };
+                    // keydown 이후 CapsLock 상태가 반전되므로:
+                    // 현재 OFF → 눌리면 ON → Keysor 켜기
+                    // 현재 ON  → 눌리면 OFF → Keysor 끄기
+                    if caps_currently_on {
+                        // CapsLock이 OFF로 전환될 것 → Keysor 끄기
                         state.deactivate_mouse_mode();
-                        action_to_take = 2; // Hide
+                        indicator_action = IndicatorAction::Hide;
                     } else {
+                        // CapsLock이 ON으로 전환될 것 → Keysor 켜기
                         state.is_mouse_mode = true;
-                        action_to_take = 1; // Show
+                        indicator_action = IndicatorAction::Show;
                     }
                 } else {
                     state.is_mouse_mode = true;
-                    action_to_take = 1; // Show
+                    indicator_action = IndicatorAction::Show;
                 }
             }
         } else if event.is_keyup {
             let elapsed = state.caps_lock_press_time.map_or(Duration::ZERO, |t| t.elapsed());
             let used_modifier = state.caps_lock_used_as_modifier;
-            
+
             state.caps_lock_press_time = None;
 
             if !is_toggle_mode {
                 state.deactivate_mouse_mode();
-                action_to_take = 2; // Hide
+                indicator_action = IndicatorAction::Hide;
             }
 
             if elapsed < Duration::from_millis(250) && !used_modifier {
@@ -538,10 +556,10 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
         }
     }
 
-    match action_to_take {
-        1 => crate::indicator::show_indicator(),
-        2 => crate::indicator::hide_indicator(),
-        _ => {}
+    match indicator_action {
+        IndicatorAction::Show => crate::indicator::show_indicator(),
+        IndicatorAction::Hide => crate::indicator::hide_indicator(),
+        IndicatorAction::None => {}
     }
 
     if should_inject {
@@ -652,44 +670,32 @@ fn process_movement_and_actions(
 ) -> (HookResult, PendingMouseAction) {
     let mut pending_action = PendingMouseAction::None;
 
-    // Shift key combinations (Shift + Q = BrowserBack, Shift + E = BrowserForward)
+    // Shift+키 조합 바인딩 테이블 (vk_code → PendingMouseAction)
     if state.shift_pressed {
-        if vk_code == VK_Q {
+        let shift_action = match vk_code {
+            VK_Q => Some(PendingMouseAction::BrowserBack),
+            VK_E => Some(PendingMouseAction::BrowserForward),
+            VK_J => Some(PendingMouseAction::VirtualDesktopLeft),
+            VK_K => Some(PendingMouseAction::VirtualDesktopRight),
+            _ => None,
+        };
+        if let Some(action) = shift_action {
             if is_keydown {
-                pending_action = PendingMouseAction::BrowserBack;
-            }
-            return (HookResult::Block, pending_action);
-        } else if vk_code == VK_E {
-            if is_keydown {
-                pending_action = PendingMouseAction::BrowserForward;
-            }
-            return (HookResult::Block, pending_action);
-        } else if vk_code == VK_J {
-            if is_keydown {
-                pending_action = PendingMouseAction::VirtualDesktopLeft;
-            }
-            return (HookResult::Block, pending_action);
-        } else if vk_code == VK_K {
-            if is_keydown {
-                pending_action = PendingMouseAction::VirtualDesktopRight;
+                pending_action = action;
             }
             return (HookResult::Block, pending_action);
         }
     } else {
-        if vk_code == VK_J {
+        // J/K 탭 전환 (Pro 전용)
+        let tab_action = match vk_code {
+            VK_J => Some(PendingMouseAction::TabLeft),
+            VK_K => Some(PendingMouseAction::TabRight),
+            _ => None,
+        };
+        if let Some(action) = tab_action {
             if is_keydown {
                 if state.is_pro || state.is_trial {
-                    pending_action = PendingMouseAction::TabLeft;
-                } else {
-                    get_system_controller().beep();
-                    println!("[License] J/K Tab switching is a Pro-only feature.");
-                }
-            }
-            return (HookResult::Block, pending_action);
-        } else if vk_code == VK_K {
-            if is_keydown {
-                if state.is_pro || state.is_trial {
-                    pending_action = PendingMouseAction::TabRight;
+                    pending_action = action;
                 } else {
                     get_system_controller().beep();
                     println!("[License] J/K Tab switching is a Pro-only feature.");
@@ -985,7 +991,7 @@ pub fn modifier_sync_guard() {
         };
 
         if let Some(hook) = KEYBOARD_HOOK.get() {
-            let on_deactivate = || {
+            let on_deactivate: fn() = || {
                 if let Some(state_arc) = APP_STATE.get() {
                     let mut state = state_arc.lock().unwrap();
                     state.deactivate_mouse_mode();
