@@ -221,21 +221,20 @@ pub static APP_STATE: OnceLock<Arc<Mutex<AppState>>> = OnceLock::new();
 static KEYBOARD_HOOK: OnceLock<Box<dyn KeyboardHook>> = OnceLock::new();
 
 /// 마우스 조작 모드 활성화 시 WASD 방향 입력을 누적하여 상대적 이동 델타를 갱신합니다.
+/// 락 획득 최소화를 위해 pre-acquired 이동 설정을 인자로 받아 처리합니다.
 fn process_mouse_movement(
     state_ptr: &Arc<Mutex<AppState>>,
+    movement_settings: Option<MovementSettings>,
+    needs_reset: bool,
     dpi_scale: f64,
     remainder_x: &mut f64,
     remainder_y: &mut f64,
 ) {
-    let movement_params = {
-        let state = state_ptr.lock().unwrap();
-        state.get_movement_settings()
-    };
-
-    if let Some(params) = movement_params {
+    if let Some(params) = movement_settings {
         let start_time = match params.movement_start_time {
             Some(t) => t,
             None => {
+                // 이동 시작 첫 프레임에만 발생하는 예외 경로
                 let now = Instant::now();
                 let mut state = state_ptr.lock().unwrap();
                 if state.movement_start_time.is_none() {
@@ -264,7 +263,7 @@ fn process_mouse_movement(
             get_system_controller().move_relative(move_x, move_y);
         }
     } else {
-        {
+        if needs_reset {
             let mut state = state_ptr.lock().unwrap();
             if state.movement_start_time.is_some() {
                 state.movement_start_time = None;
@@ -278,16 +277,13 @@ fn process_mouse_movement(
 /// 마우스 조작 모드 활성화 시 스크롤 키 입력을 가속 처리하여 마우스 휠 동작을 에뮬레이션합니다.
 fn process_mouse_scrolling(
     state_ptr: &Arc<Mutex<AppState>>,
+    scroll_settings: Option<ScrollSettings>,
+    needs_reset: bool,
     dt: f64,
     remainder_scroll_x: &mut f64,
     remainder_scroll_y: &mut f64,
 ) {
-    let scroll_params = {
-        let state = state_ptr.lock().unwrap();
-        state.get_scroll_settings()
-    };
-
-    if let Some(params) = scroll_params {
+    if let Some(params) = scroll_settings {
         let start_time = match params.scroll_start_time {
             Some(t) => t,
             None => {
@@ -330,7 +326,7 @@ fn process_mouse_scrolling(
             *remainder_scroll_x = 0.0;
         }
     } else {
-        {
+        if needs_reset {
             let mut state = state_ptr.lock().unwrap();
             if state.scroll_start_time.is_some() {
                 state.scroll_start_time = None;
@@ -354,13 +350,28 @@ fn start_movement_thread(state_ptr: Arc<Mutex<AppState>>) {
         loop {
             thread::sleep(Duration::from_millis(interval_ms));
 
-            // 1. 마우스 이동 연산 분리 호출
-            process_mouse_movement(&state_ptr, dpi_scale, &mut remainder_x, &mut remainder_y);
-
-            let (is_mouse_mode, hz) = {
+            // 단일 락 획득으로 모든 상태 및 제어 파라미터를 동시 추출하여 락 경쟁 최소화
+            let (is_mouse_mode, hz, movement_settings, scroll_settings, needs_movement_reset, needs_scroll_reset) = {
                 let state = state_ptr.lock().unwrap();
-                (state.is_mouse_mode, state.config.settings.refresh_rate_hz.unwrap_or(100))
+                (
+                    state.is_mouse_mode,
+                    state.config.settings.refresh_rate_hz.unwrap_or(100),
+                    state.get_movement_settings(),
+                    state.get_scroll_settings(),
+                    state.movement_start_time.is_some(),
+                    state.scroll_start_time.is_some(),
+                )
             };
+
+            // 1. 이동 연산 처리 (락이 이미 릴리즈된 상태에서 계산 및 API 호출)
+            process_mouse_movement(
+                &state_ptr,
+                movement_settings,
+                needs_movement_reset,
+                dpi_scale,
+                &mut remainder_x,
+                &mut remainder_y,
+            );
 
             // 2. 인디케이터 스냅 및 실시간 위치 갱신 연산 복원
             if is_mouse_mode {
@@ -368,19 +379,25 @@ fn start_movement_thread(state_ptr: Arc<Mutex<AppState>>) {
                 crate::indicator::check_magnetic_snapping();
                 crate::indicator::check_global_magnetic_snapping();
                 was_mouse_mode = true;
-            } else {
-                if was_mouse_mode {
-                    crate::ui::win_gdi::force_restore_system_cursor();
-                    was_mouse_mode = false;
-                }
+            } else if was_mouse_mode {
+                crate::ui::win_gdi::force_restore_system_cursor();
+                was_mouse_mode = false;
             }
 
-            let safe_hz = hz.max(10).min(1000);
+            // 마우스 모드가 비활성화 상태인 경우 불필요한 루프 오버헤드를 낮추기 위해 40Hz(25ms)로 동작
+            let safe_hz = if is_mouse_mode { hz.max(10).min(1000) } else { 40 };
             interval_ms = 1000 / safe_hz;
             let dt = interval_ms as f64 / 1000.0;
 
-            // 3. 마우스 스크롤 연산 분리 호출
-            process_mouse_scrolling(&state_ptr, dt, &mut remainder_scroll_x, &mut remainder_scroll_y);
+            // 3. 마우스 스크롤 연산 처리
+            process_mouse_scrolling(
+                &state_ptr,
+                scroll_settings,
+                needs_scroll_reset,
+                dt,
+                &mut remainder_scroll_x,
+                &mut remainder_scroll_y,
+            );
         }
     });
 }

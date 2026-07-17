@@ -45,7 +45,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
         let is_keyup = wparam == WM_KEYUP as usize || wparam == WM_SYSKEYUP as usize;
         let is_keydown = wparam == WM_KEYDOWN as usize || wparam == WM_SYSKEYDOWN as usize;
 
-        // 콘솔 디버그 로그 추가
+        #[cfg(debug_assertions)]
         println!("[Hook Debug] low_level_keyboard_proc: vk_code={}, is_keydown={}, is_keyup={}", vk_code, is_keydown, is_keyup);
 
         let is_injected = kbd_struct.dw_extra_info == KEYSOR_SIGNATURE;
@@ -60,14 +60,17 @@ unsafe extern "system" fn low_level_keyboard_proc(
         if let Some(cb) = HOOK_CALLBACK.get() {
             match cb(event) {
                 HookResult::Block => {
+                    #[cfg(debug_assertions)]
                     println!("[Hook Debug] HookResult::Block returned for vk_code={}", vk_code);
                     return 1;
                 }
                 HookResult::Pass => {
+                    #[cfg(debug_assertions)]
                     println!("[Hook Debug] HookResult::Pass returned for vk_code={}", vk_code);
                 }
             }
         } else {
+            #[cfg(debug_assertions)]
             println!("[Hook Debug] HOOK_CALLBACK is None!");
         }
     }
@@ -97,6 +100,7 @@ impl KeyboardHook for WindowsKeyboardHook {
             }
 
             H_HOOK.set(std::sync::Mutex::new(hook)).ok();
+            #[cfg(debug_assertions)]
             println!("[Hook Debug] SetWindowsHookExW success. hook={}", hook);
 
             let mut msg: MSG = std::mem::zeroed();
