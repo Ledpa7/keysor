@@ -2475,7 +2475,9 @@ pub fn show_indicator() {
             windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(main_hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_MINIMIZE);
         }
     }
-    // 마우스 모드 활성화 시 INDICATOR_HWND 오버레이 창을 화면 최상단 위로 선명하게 노출 (SW_SHOWNA)
+    // 마우스 모드 활성화 즉시 시스템 커서를 숨기고 위치를 동기화하여 기본 커서 동시 노출(이중 커서) 방지
+    force_hide_system_cursor();
+    update_indicator_position();
     if let Some(&hwnd) = INDICATOR_HWND.get() {
         unsafe {
             windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNA);
