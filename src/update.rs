@@ -4,7 +4,7 @@ use std::time::Duration;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const VERSION_CHECK_URL: &str = "https://api.github.com/repos/Ledpa7/keysor/releases/latest";
-const DOWNLOAD_PAGE: &str = "https://www.keysoy.ledpa7.com";
+const DOWNLOAD_PAGE: &str = "https://keysor.ledpa7.com";
 
 /// 비동기로 버전 체크를 수행합니다.
 pub fn check_for_updates_async() {

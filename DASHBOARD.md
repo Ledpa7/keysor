@@ -152,6 +152,19 @@
 
 ---
 
+## 📅 최근 주요 패치 및 수정 내역 (Recent Updates - 2026-07-23)
+
+- **[x] 다운로드 폴더 내 무서빙 바이너리 실행 오류(`서버에서 참조를 반환했습니다.`) 완전 해결**:
+  - `keysor.manifest` [MODIFY]: 이전 1.0.1 패치 시 `asInvoker` + `uiAccess="true"` 매니페스트로 변경되면서 윈도우 OS의 보안 정책(유료 디지털 서명이 없거나 `Program Files` 경로가 아니면 실행 차단)에 걸려, 다운로드 폴더에서 실행할 때 `서버에서 참조를 반환했습니다.` 에러 메시지를 내며 기동이 차단되던 이슈를 원천 해결했습니다.
+  - `keysor.manifest` [MODIFY]: 실행 권한 요구 수준을 `level="requireAdministrator"` 및 `uiAccess="false"`로 복구하여 일반 사용자가 다운로드 폴더에서 `.exe` 파일 더블클릭 시 기존처럼 UAC 관리자 권한 승인 팝업 후 즉시 정상 작동하도록 정상화했습니다.
+  - `build.rs` [MODIFY]: `cargo:rerun-if-changed=keysor.manifest` 빌드 스크립트 트래커를 추가하여 매니페스트 수정 시 릴리즈 바이너리가 누락 없이 재컴파일되도록 보완했습니다.
+- **[x] 무한 버전 업데이트 팝업 방지를 위한 로컬-원격 버전 동기화**:
+  - `Cargo.toml` [MODIFY]: 원격 GitHub Release의 최신 태그 버전(`v1.0.1`)과 로컬 소스코드 패키지 버전(`1.0.0`)의 불일치로 인해 앱 기동마다 "새 버전이 있습니다" 무한 팝업이 출력되던 문제를 원인 분석하고, `Cargo.toml`의 버전을 `1.0.1`로 상향 통일했습니다.
+- **[x] 버전 업데이트 팝업 내 이동 도메인 URL 교정 및 DNS 검증**:
+  - `src/update.rs` [MODIFY]: 업데이트 안내 팝업창에서 [예] 버튼 클릭 시 연결되는 이동 URL 주소를 기존 오타가 포함되어 있던 `https://www.keysoy.ledpa7.com` 및 DNS CNAME/A 레코드가 미등록되어 브라우저 접속 불가(`ERR_NAME_NOT_RESOLVED`) 현상을 내던 `www.` 포함 주소 대신, 실제 정상 200 OK 응답이 되는 공식 웹사이트 주소 **`https://keysor.ledpa7.com`**으로 완벽히 교정 및 릴리즈 빌드 완료했습니다.
+
+---
+
 ## 📅 이전 패치 및 수정 내역 (Previous Updates - 2026-07-08)
 
 - **[x] 홈페이지 헤더 "Go Pro" 결제 유도 버튼 추가 및 다국어 지원**:
