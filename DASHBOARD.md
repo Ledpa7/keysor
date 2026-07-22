@@ -64,7 +64,17 @@
     - **실패 원인**: 원격 데스크톱 비디오 스트림은 OS 기본 시스템 커서를 캡처하지 않으므로, 시스템 팝업 시 Keysor 오버레이 창을 `SW_HIDE` 로 꺼버리면 원격 비디오 화면에 커서가 100% 안 보이고 소실됨.
     - **필수 지침**: 원격 데스크톱 환경 스트림 캡처를 위해 마우스 모드에서는 시작 메뉴/팝업이 떠도 Keysor 오버레이 창(`INDICATOR_HWND`)을 100% 무조건 `SW_SHOWNA` 로 상시 유지할 것.
 
-  - `src/ui/win_gdi.rs` [MODIFY & FIX]: 원격 데스크톱(Chrome Remote Desktop / Remote Desktop) 환경에서 OS 기본 커서 캡처가 안 되어 커서가 안 보이던 10000% 진짜 원인을 수술했습니다. 이제 시작 메뉴나 팝업창이 떠올라도 Keysor 초록색 커스텀 오버레이 커서 창이 `SW_SHOWNA` 로 100% 상시 유지되어 원격 화면 비디오 프레임에 100% 선명하게 포착 표출됩니다.
+16. **`Win+Z` 키보드 신호 자동 시뮬레이션을 통한 Snap Layout 트리거 시도 (실패)**
+    - **실패 원인**: `keybd_event`로 `VK_LWIN + Z` 전송 시, 윈도우 키보드 훅과의 타이밍 불일치로 `Win` 키 단독 입력으로 오인식되어 윈도우 시작 메뉴가 화면 앞으로 솟구쳐 튀어나오는 예기치 않은 부작용 발생.
+    - **금지 지침**: 시작 메뉴 개입 위험이 있는 `Win+Z` 자동 트리거 시뮬레이션을 함부로 수행하지 말 것.
+
+17. **Snap Layout 활성화 시 마우스 이동(`SetCursorPos`) 강제 차단/고정 시도 (실패)**
+    - **실패 원인**: 마우스 위치를 0으로 강제 고정시켜버리면 사용자가 키서(WASD)로 마우스를 움직여 Snap Layout 팝업창 내부의 원하는 분할 구역(사분면)으로 커서를 이동하거나 클릭 선택을 할 수 없게 됨.
+    - **금지 지침**: 마우스 커서 위치를 강제로 묶어 이동을 차단하는 짓을 하지 말 것.
+
+18. **서스팬드(`is_suspended`) 또는 팝업 상태 시 100Hz 오버레이 `BringWindowToTop` 지속 호출 (실패)**
+    - **실패 원인**: 숨겨진 HWND 오버레이 창이 매 프레임 `BringWindowToTop`과 `SetWindowPos`를 실행하면서 DWM 렌더링 포커스를 건드려 OS Snap Layout 팝업창을 즉시 닫아버리는 문제 유발.
+    - **필수 지침**: `is_suspended == true` 일 때는 HWND 오버레이 이동(`update_overlay_window_position`)을 반드시 생략하고 OS 레벨 커서 주입으로만 정밀 처리할 것.
 
 ---
 
@@ -75,13 +85,27 @@
 - [x] **4단계: 실조작 테스트**: 시작 메뉴 위에서 가려짐 없이 마우스 모드 커서 렌더링 유지 여부 검증.
 
 - **[x] UIAccess 정식 코드 서명 & C:\Program Files\Keysor 배포 완전 구축 (Full UIAccess Code Signing & Deployment)**:
-  - **인증서 발급 & 서명**: 로컬 신뢰 기관 코드 서명 인증서(`KeysorDevCert`)를 정식 발급하고 `Set-AuthenticodeSignature` 적용 통과(`Signature Status: Valid`).
+  - **인증서 발급 & 서명**: 로컬 신뢰 기관 코드 서명 인증서(`KeysorDevCert`)를 `Cert:\LocalMachine\Root` 및 `Cert:\LocalMachine\TrustedPublisher`까지 자동 등록하도록 개선하여 `Set-AuthenticodeSignature` 통과(`Signature Status: Valid`).
   - **Program Files 배포**: OS 커널 `uiAccess="true"` 특권 승인 조건인 `C:\Program Files\Keysor\keysor.exe` 경로 배포 및 바탕화면 바로가기(`keysor.lnk`) 타깃 동기화 완료.
   - **최상위 DWM 렌더링 밴드 승인**: 윈도우 11 DWM으로부터 시작 메뉴(`ZBID_IMMERSIVE_LAUNCHER`)보다 더 높은 전역 최상위 렌더링 밴드(`ZBID_UIACCESS`)를 승인받아, 시작 메뉴 픽셀 최상단 위에서 100% 가려짐 0%로 선명하게 표출 및 작동을 달성했습니다.
-  - `src/ui/win_gdi.rs` [REVERT & REFLECT]: 임시 디버그 로깅, 비공식 `SetWindowBand` API, UAC 스폰 등의 지저분한 코드를 완전 소거하고 원래의 깨끗하고 안전한 오버레이 창 아키텍처로 원복했습니다.
-  - `src/ui/win_gdi.rs` [MODIFY]: 마우스 포인터가 작업 표시줄 영역 위로 이동하거나 작업 표시줄을 클릭할 때 Keysor 오버레이 창(`INDICATOR_HWND`)이 스스로 꺼지고 숨겨지던 과도한 은폐 조건(`shell_traywnd` / `is_cursor_over_taskbar`)을 완전 소거했습니다. 이제 작업 표시줄 위에서도 Keysor 고유의 초록색 오버레이 커서 모양이 숨겨지지 않고 화면 최상단 위에서 100% 지속 노출 및 무결점 유지되도록 교정 완료했습니다.
 
-## 📅 최신 패치 및 수정 내역 (Latest Updates - 2026-07-16)
+## 📅 최신 패치 및 수정 내역 (Latest Updates - 2026-07-23)
+
+- **[x] LocalMachine 코드 서명 인증서 자동화 & UIAccess 100% 승인 체계 구축**:
+  - `sign_and_deploy.ps1` [MODIFY]: UIAccess 특권 승인 핵심 요구사항인 `Cert:\LocalMachine\Root` 및 `Cert:\LocalMachine\TrustedPublisher` 스토어에 `KeysorDevCert` 인증서를 자동 등록하는 파이프라인을 완비했습니다.
+  - `src/ui/win_gdi.rs` [MODIFY]: `is_process_uiaccess_active()` 진단 로직을 추가하여 기동 시 UIAccess 실제 승인 여부를 검증(`Process UIAccess Active: true`).
+
+- **[x] OS 시스템 커서 이중 노출 방지 & 하이브리드 커서 스위칭 렌더러 도입**:
+  - `src/ui/win_gdi.rs` [MODIFY]: 키서 마우스 모드 ON 시 `SetSystemCursor`로 Arrow, Hand, IBeam, Wait 등 주요 커서 8종을 투명(`blank`) 커서로 교체하여 기본 OS 커서와 가상 커서가 동시 겹치던 이중 커서 및 잔상 현상을 100% 차단했습니다.
+  - 마우스 모드 OFF 시 `SPI_SETCURSORS` 호출로 OS 원본 커서를 즉시 깨끗하게 100% 복원하도록 구현했습니다.
+  - 시스템 팝업/시작 메뉴 활성화(`is_suspended == true`) 시 GDI+로 32x32px 3선 네온 그린 Keysor 커서를 오프스크린 드로잉하여 `SetSystemCursor`로 직접 주입(`inject_keysor_cursor`)함으로써 시작 메뉴 및 시스템 팝업 위에서도 커서가 100% 선명하게 표출되도록 구현했습니다.
+
+- **[x] Snap Layout 팝업 실험적 기능 안정화 원복**:
+  - `src/platform/windows/mouse.rs` [MODIFY], `src/ui/win_gdi.rs` [MODIFY]: Snap Layout 호버 시 `Win+Z` 자동 발사 및 커서 이동 억제 실험 중 발생한 시작 메뉴 개입 및 조작 제약 부작용을 검증 후 깔끔히 원복(Rollback)하여 원래의 안정적인 렌더링 및 조작 시스템으로 정돈했습니다.
+
+---
+
+## 📅 이전 패치 내역 (Previous Updates - 2026-07-16)
 
 - **[x] 홈페이지 복구, 다국어 번역 모듈화 리팩토링 및 성능 최적화 (Homepage Refactoring & Event Optimizations)**:
   - **강제 종료 문제 복구**: 리팩토링 중 강제 종료로 깨진 [main.js](file:///c:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/homepage/src/main.js) 코드를 직전 안정 버전(`f592055`)으로 원복 후 리팩토링을 재적용했습니다.
