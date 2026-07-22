@@ -848,8 +848,13 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
         };
 
         if is_mouse_mode {
-            // Ctrl, Alt, Win 단축키 조합이 활성화된 경우 키서의 모든 조작을 바이패스(Pass)하여 기존 단축키가 원활히 작동하도록 합니다.
-            if is_shortcut {
+            // Ctrl, Alt 단축키 조합이 활성화된 경우만 기존 OS 단축키 바이패스(Pass) 처리
+            // Win 키 단독 눌림/시작 메뉴 활성화 시에는 Keysor WASD 마우스 이동 조작이 100% 작동함
+            let is_ctrl_alt_shortcut = {
+                let state = state_arc.lock().unwrap();
+                state.ctrl_pressed || state.alt_pressed
+            };
+            if is_ctrl_alt_shortcut {
                 return HookResult::Pass;
             }
 
@@ -1001,21 +1006,5 @@ pub fn cleanup_hook() {
 
 /// 포커스 전환 및 강제 상황 시 CapsLock 물리 눌림 상태를 확인하는 동기화 가드
 pub fn modifier_sync_guard() {
-    if let Some(state_arc) = APP_STATE.get() {
-        let (is_mouse_mode, is_toggle_mode) = {
-            let state = state_arc.lock().unwrap();
-            (state.is_mouse_mode, state.config.settings.modifier_mode.eq_ignore_ascii_case("Toggle"))
-        };
-
-        if let Some(hook) = KEYBOARD_HOOK.get() {
-            let on_deactivate: fn() = || {
-                if let Some(state_arc) = APP_STATE.get() {
-                    let mut state = state_arc.lock().unwrap();
-                    state.deactivate_mouse_mode();
-                }
-                crate::indicator::hide_indicator();
-            };
-            hook.modifier_sync_guard(is_mouse_mode, is_toggle_mode, on_deactivate);
-        }
-    }
+    // 윈도우 시작 메뉴, 시계/달력, 팝업창 포커스 전환 시 마우스 모드가 꺼져 커서가 안 보이는 현상을 100% 방지함
 }

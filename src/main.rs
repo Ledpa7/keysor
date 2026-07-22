@@ -21,6 +21,8 @@ fn encode_wide(s: &str) -> Vec<u16> {
 }
 
 fn main() {
+
+
     #[cfg(windows)]
     unsafe {
         windows_sys::Win32::UI::WindowsAndMessaging::SetProcessDPIAware();
@@ -133,6 +135,7 @@ fn ctrlc_shutdown_handler() {
             if ctrl_type <= 2 {
                 println!("\n[Shutdown] Cleaning up low-level hook resources safely before exit...");
                 hook::cleanup_hook();
+                ui::win_gdi::force_restore_system_cursor();
                 std::process::exit(0);
             }
             0
@@ -145,3 +148,5 @@ fn ctrlc_shutdown_handler() {
 fn ctrlc_shutdown_handler() {
     // macOS/Unix shutdown handling
 }
+
+

@@ -29,3 +29,5 @@ embed-resource = "2.5.0"
 [[bin]]
 name = "test_uia"
 path = "scratch/test_uia.rs"
+
+

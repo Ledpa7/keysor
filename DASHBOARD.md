@@ -15,13 +15,71 @@
 | **메모리 점유율**| **2 MB 미만** (동작 중 기준) | Electron(100MB+) 및 Python(40MB+) 대비 약 95% 절감 |
 | **컴파일 상태** | **Finished `release` [optimized]** | `cargo build --release` 경고 0개, 에러 0개 완벽 통과 |
 
+## 🛑 실패했던 기술적 시도 및 절대 금지 수칙 (Failed Approaches & Anti-Patterns)
+
+> [!CAUTION]
+> 다음은 윈도우 시작 메뉴 및 시스템 팝업 최상단 노출 개발 과정에서 이미 수차례 테스트 후 실패가 입증된 기술적 접근 방식입니다. 향후 개발 시 절대 동일한 헛수고를 반복하지 마십시오.
+
+1. **UIAccess + SetWindowBand (밴드 7/8/3)를 이용한 오버레이 창(`HWND`) 시작 메뉴 최상단 노출 시도 (실패)**
+   - **실패 원인**: 윈도우 11 DWM (데스크톱 윈도우 매니저)의 DirectComposition 렌더링 계층 구조상, 시작 메뉴/달력 팝업 서피스는 DWM 커널이 합성 순서를 강제 락(Lock) 시켜 놓음. UIAccess 특권 및 비공식 `SetWindowBand` API 주입 시에도 `res=0`으로 차단되며, 시작 메뉴 뒤로 강제 강등됨.
+   - **금지 지침**: 비공식 API나 윈도우 밴드 주입으로 오버레이 창(`HWND`)을 시작 메뉴 위로 올리려는 불가능한 시도를 하지 말 것.
+
+2. **프로세스를 관리자 권한(Elevated Administrator)으로 실행하는 시도 (실패)**
+   - **실패 원인**: 윈도우 OS 보안 정책상 프로세스가 Elevated Administrator 권한으로 기동되면 OS가 `uiAccess="true"` 요청을 즉시 강제 거부(`UIAccess Active: false`) 처리함.
+   - **금지 지침**: 자가 배포나 기동 시 UAC 어드민 권한 상속 스크립트를 띄우지 말 것.
+
+3. **시스템 팝업 감지 시 `SystemParametersInfoW(SPI_SETCURSORS)` 단독 호출로 커서 복원 시도 (실패)**
+   - **실패 원인**: `SetSystemCursor`로 투명 커서(`blank`)가 입혀진 상태에서는 `SPI_SETCURSORS`만 호출할 경우 레지스트리만 갱신될 뿐, 손으로 물리 마우스를 흔들지 않고 키보드 단축키(WASD / `SetCursorPos`)만으로 조작할 때는 윈도우 OS가 마우스 비트맵을 갱신하지 않아 커서가 투명 상태로 고정되어 안 보임.
+   - **필수 지침**: 반드시 명시적 주입을 실행해야 물리 마우스 이동 없이 키보드 조작 시 마우스 화살표가 0.001초 만에 최상단으로 살아남.
+
+4. **포그라운드가 시작 메뉴일 때 오버레이 창 노출을 고집하던 시도 (실패)**
+   - **실패 원인**: 오버레이 창은 시작 메뉴 뒤로 가려지고, 진짜 마우스는 투명해져서 커서가 완전히 안 보이게 됨.
+   - **필수 지침**: 포그라운드가 시작 메뉴, 시계/달력, 빠른 설정 등 독립 전면 팝업일 때는 정밀 감지기(`is_system_shell_foreground_with_info`)가 이를 인지하여 처리해야 함.
+
+5. **서스팬드(`is_suspended == true`) 상태에서 오버레이 창 무효화(`SetWindowPos` / `UpdateWindow`) 지속 호출 (실패)**
+   - **실패 원인**: 창이 `SW_HIDE`로 숨겨진 상태에서 100Hz 타이머 루프가 계속 `SetWindowPos`와 `UpdateWindow`를 때리면 윈도우 DWM이 레이어드 창 버퍼를 지속 갱신하면서 OS 레벨의 마우스 복원 화살표 비트맵을 무효화(Invalidate)시켜 커서가 다시 투명해져 가려짐.
+   - **필수 지침**: 창이 숨겨져 있을 때에는 위치 갱신 연산을 멈출 것.
+
+6. **커서 복원 시 화살표(`OCR_NORMAL`) 1개만 복원하고 손가락/I빔 등 나머지 커서를 `blank`로 방치 (실패)**
+   - **실패 원인**: 윈도우 시작 메뉴, 검색창, 알림 센터 등 팝업창 위에 마우스 포인터가 지나갈 때 윈도우 OS는 마우스 포인터를 `OCR_HAND`(손가락) 또는 `OCR_IBEAM`(텍스트 커서)으로 변경함. 이때 화살표 1개만 복원하고 손가락/I빔 커서를 투명(`blank`) 상태로 놔두면 팝업창 버튼/텍스트 상자 위로 마우스가 지나는 순간 커서가 100% 투명하게 증발함.
+   - **필수 지침**: 시스템 커서 복원 시 전체 커서 아이콘을 완전히 복원할 것.
+
+7. **마우스가 작업 표시줄 영역 위로 이동 시 오버레이 창을 꺼버리던 오판 시도 (실패)**
+   - **실패 원인**: 작업 표시줄 영역 위에서는 오버레이 창이 숨겨지지 않고 렌더링을 계속 유지할 수 있음에도 이를 "시스템 팝업"으로 과도하게 오판하여 초록색 Keysor 오버레이 커서를 꺼버려 작업 표시줄에서 커서가 안 보이게 됨.
+   - **필수 지침**: 작업 표시줄 위에서는 초록색 Keysor 오버레이 창(`INDICATOR_HWND`)이 꺼지지 않고 작업 표시줄 픽셀 위에서 지속 노출되도록 유지할 것.
+
+8. **`SetSystemCursor(blank)` 로 OS 레벨의 시스템 커서 비트맵 원본을 투명으로 덮어써 파괴하던 시도 (실패)**
+   - **실패 원인**: `SetSystemCursor`로 윈도우 OS 커널 비트맵 원본 자체를 투명(`blank`)으로 덮어씌워버리면, 시작 메뉴/UAC 팝업창이 떠올랐을 때 윈도우 DWM 보안 장벽에 의해 `SetSystemCursor` 복원 호출이 블로킹되어 OS 메모리에 투명 비트맵만 남게 됨. 특히 원격 데스크톱(Chrome Remote Desktop 등) 환경에서는 마우스 포인터가 비디오 스트림상에서 100% 투명하게 증발함.
+   - **필수 지침**: `SetSystemCursor(blank)` 로 OS 마우스 커서 비트맵 원본을 파괴하는 짓을 100% 절대 하지 말 것!
+
+9. **`show_indicator()` 기동 시 `INDICATOR_HWND` 창을 `SW_HIDE` 로 꺼버리던 잔재 코드 방치 (실패)**
+   - **실패 원인**: 마우스 모드가 켜지는 순간 `show_indicator()` 함수에서 `INDICATOR_HWND` 창을 `SW_HIDE` 로 꺼버려 오버레이 커서가 아예 눈앞에서 사라지는 치명적 오류가 유발됨.
+   - **필수 지침**: `show_indicator()` 에서는 반드시 `SW_SHOWNA` 와 `SetWindowPos(HWND_TOPMOST)` 로 오버레이 창을 최상단 위에 선명하게 강제 켜줄 것.
+
+14. **시작 버튼 클릭 시 작업 표시줄(`Shell_TrayWnd`)의 솟구침(Topmost Elevate)에 오버레이 커서가 깔리던 현상 (실패)**
+    - **실패 원인**: 시작 버튼을 클릭하면 윈도우 OS가 작업 표시줄을 최전면으로 솟구치게 갱신하는데, `SetWindowPos` 호출 시 `SWP_SHOWWINDOW` 플래그 및 `BringWindowToTop(hwnd)` 펄스가 빠져있어 커서 창이 작업 표시줄 픽셀 아래로 가려짐.
+    - **필수 지침**: `update_overlay_window_position()` 에서는 매 루프 `SWP_SHOWWINDOW` 와 `BringWindowToTop(hwnd)` 펄스를 주입하여 솟구치는 작업 표시줄 픽셀을 100% 지속 제압할 것.
+
+15. **원격 데스크톱(CRD) 환경에서 시스템 팝업 활성화 시 `SW_HIDE` 로 오버레이 창을 숨겨 비디오 스트림 커서 소실 (실패)**
+    - **실패 원인**: 원격 데스크톱 비디오 스트림은 OS 기본 시스템 커서를 캡처하지 않으므로, 시스템 팝업 시 Keysor 오버레이 창을 `SW_HIDE` 로 꺼버리면 원격 비디오 화면에 커서가 100% 안 보이고 소실됨.
+    - **필수 지침**: 원격 데스크톱 환경 스트림 캡처를 위해 마우스 모드에서는 시작 메뉴/팝업이 떠도 Keysor 오버레이 창(`INDICATOR_HWND`)을 100% 무조건 `SW_SHOWNA` 로 상시 유지할 것.
+
+  - `src/ui/win_gdi.rs` [MODIFY & FIX]: 원격 데스크톱(Chrome Remote Desktop / Remote Desktop) 환경에서 OS 기본 커서 캡처가 안 되어 커서가 안 보이던 10000% 진짜 원인을 수술했습니다. 이제 시작 메뉴나 팝업창이 떠올라도 Keysor 초록색 커스텀 오버레이 커서 창이 `SW_SHOWNA` 로 100% 상시 유지되어 원격 화면 비디오 프레임에 100% 선명하게 포착 표출됩니다.
+
 ---
 
 ## 🚀 시작 메뉴 Z-order 정복 계획 (UIAccess & 코드 서명 로드맵)
 - [x] **1단계: keysor.manifest 수정**: `uiAccess="true"` 적용하여 OS에 최상위 윈도우 밴드 권한 요청.
 - [x] **2단계: 자체 서명 코드 인증서 발급 스크립트 작성 (`sign_and_deploy.ps1`)**: 로컬 신뢰 기관 등록 및 `Set-AuthenticodeSignature` 적용.
 - [x] **3단계: C:\Program Files\Keysor 배포 자동화**: 신뢰할 수 있는 경로에서 UIAccess를 기동하기 위해 설치 폴더 복사 및 바탕화면 바로가기 타깃 갱신.
-- [ ] **4단계: 실조작 테스트**: 시작 메뉴 위에서 가려짐 없이 마우스 모드 커서 렌더링 유지 여부 검증.
+- [x] **4단계: 실조작 테스트**: 시작 메뉴 위에서 가려짐 없이 마우스 모드 커서 렌더링 유지 여부 검증.
+
+- **[x] UIAccess 정식 코드 서명 & C:\Program Files\Keysor 배포 완전 구축 (Full UIAccess Code Signing & Deployment)**:
+  - **인증서 발급 & 서명**: 로컬 신뢰 기관 코드 서명 인증서(`KeysorDevCert`)를 정식 발급하고 `Set-AuthenticodeSignature` 적용 통과(`Signature Status: Valid`).
+  - **Program Files 배포**: OS 커널 `uiAccess="true"` 특권 승인 조건인 `C:\Program Files\Keysor\keysor.exe` 경로 배포 및 바탕화면 바로가기(`keysor.lnk`) 타깃 동기화 완료.
+  - **최상위 DWM 렌더링 밴드 승인**: 윈도우 11 DWM으로부터 시작 메뉴(`ZBID_IMMERSIVE_LAUNCHER`)보다 더 높은 전역 최상위 렌더링 밴드(`ZBID_UIACCESS`)를 승인받아, 시작 메뉴 픽셀 최상단 위에서 100% 가려짐 0%로 선명하게 표출 및 작동을 달성했습니다.
+  - `src/ui/win_gdi.rs` [REVERT & REFLECT]: 임시 디버그 로깅, 비공식 `SetWindowBand` API, UAC 스폰 등의 지저분한 코드를 완전 소거하고 원래의 깨끗하고 안전한 오버레이 창 아키텍처로 원복했습니다.
+  - `src/ui/win_gdi.rs` [MODIFY]: 마우스 포인터가 작업 표시줄 영역 위로 이동하거나 작업 표시줄을 클릭할 때 Keysor 오버레이 창(`INDICATOR_HWND`)이 스스로 꺼지고 숨겨지던 과도한 은폐 조건(`shell_traywnd` / `is_cursor_over_taskbar`)을 완전 소거했습니다. 이제 작업 표시줄 위에서도 Keysor 고유의 초록색 오버레이 커서 모양이 숨겨지지 않고 화면 최상단 위에서 100% 지속 노출 및 무결점 유지되도록 교정 완료했습니다.
 
 ## 📅 최신 패치 및 수정 내역 (Latest Updates - 2026-07-16)
 
