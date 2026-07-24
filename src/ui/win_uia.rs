@@ -184,10 +184,8 @@ fn get_dynamic_thresholds() -> (f64, f64) {
         .map(|arc| arc.lock().unwrap().config.settings.magnetic_sensitivity.unwrap_or(1.3))
         .unwrap_or(1.3);
 
-    // 1280 해상도 기준 1.0배, 1920 해상도 기준 user_sensitivity배가 되도록 선형 보정 (최소 1.0)
-    // 1920 - 1280 = 640 이므로, 640px 차이당 (user_sensitivity - 1.0)배씩 증가
-    let rate = (user_sensitivity - 1.0).max(0.0);
-    let res_scale = (1.0 + (monitor_width as f64 - 1280.0) / 640.0 * rate).max(1.0);
+    // 1280 해상도 및 1920 해상도 모두 동일하게 1280 사이즈(1.0배)로 적용
+    let res_scale = 1.0f64;
     
     let dpi_scale = crate::platform::get_system_controller().get_dpi_scale();
     let final_scale = res_scale.max(dpi_scale);
