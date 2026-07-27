@@ -25,7 +25,19 @@ fn main() {
 
     #[cfg(windows)]
     unsafe {
-        windows_sys::Win32::UI::WindowsAndMessaging::SetProcessDPIAware();
+        // Windows 10 (1607+) PerMonitorV2 다중 모니터 DPI 개별 연동 설정
+        type SetProcessDpiAwarenessContextFn = unsafe extern "system" fn(isize) -> i32;
+        let user32 = windows_sys::Win32::System::LibraryLoader::LoadLibraryA(b"user32.dll\0".as_ptr());
+        if user32 != 0 {
+            if let Some(proc) = windows_sys::Win32::System::LibraryLoader::GetProcAddress(user32, b"SetProcessDpiAwarenessContext\0".as_ptr()) {
+                let set_dpi: SetProcessDpiAwarenessContextFn = std::mem::transmute(proc);
+                set_dpi(-4); // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+            } else {
+                windows_sys::Win32::UI::WindowsAndMessaging::SetProcessDPIAware();
+            }
+        } else {
+            windows_sys::Win32::UI::WindowsAndMessaging::SetProcessDPIAware();
+        }
         
         // 중복 실행 감지: 기존 실행 중인 키서 창이 있으면 WM_CLOSE를 전송하여 종료시키고 새 인스턴스는 종료 (Toggle 기능)
         let class_name = encode_wide("KeysorMainClass");

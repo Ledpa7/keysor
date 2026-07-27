@@ -999,9 +999,64 @@ pub fn trigger_click_motion(click_type: ClickType) {
     }
 }
 
+pub fn get_dpi_scale_at_cursor() -> f64 {
+    type GetDpiForMonitorFn = unsafe extern "system" fn(
+        windows_sys::Win32::Graphics::Gdi::HMONITOR,
+        u32,
+        *mut u32,
+        *mut u32,
+    ) -> i32;
+
+    static GET_DPI_FN: OnceLock<Option<GetDpiForMonitorFn>> = OnceLock::new();
+    let get_dpi = GET_DPI_FN.get_or_init(|| unsafe {
+        let shcore = windows_sys::Win32::System::LibraryLoader::LoadLibraryA(b"Shcore.dll\0".as_ptr());
+        if shcore != 0 {
+            let proc = windows_sys::Win32::System::LibraryLoader::GetProcAddress(shcore, b"GetDpiForMonitor\0".as_ptr());
+            if let Some(p) = proc {
+                return Some(std::mem::transmute(p));
+            }
+        }
+        None
+    });
+
+    unsafe {
+        let mut pt = std::mem::zeroed();
+        windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt);
+        let h_monitor = windows_sys::Win32::Graphics::Gdi::MonitorFromPoint(
+            pt,
+            windows_sys::Win32::Graphics::Gdi::MONITOR_DEFAULTTONEAREST,
+        );
+
+        if h_monitor != 0 {
+            if let Some(func) = get_dpi {
+                let mut dpi_x = 96;
+                let mut dpi_y = 96;
+                if func(h_monitor, 0, &mut dpi_x, &mut dpi_y) == 0 && dpi_x > 0 {
+                    return dpi_x as f64 / 96.0;
+                }
+            }
+        }
+    }
+
+    crate::platform::get_system_controller().get_dpi_scale()
+}
+
+fn get_indicator_dpi_scale() -> f64 {
+    let sys_dpi = get_dpi_scale_at_cursor();
+    if sys_dpi >= 1.8 {
+        2.0    // 200% DPI 이상 -> 2.0배 (64px)
+    } else if sys_dpi >= 1.4 {
+        1.5    // 150% DPI -> 1.5배 (48px)
+    } else if sys_dpi >= 1.15 {
+        1.25   // 125% DPI -> 1.25배 (40px)
+    } else {
+        1.0    // 100% DPI -> 1.0배 (32px)
+    }
+}
+
 fn update_indicator_layered_image(hwnd: HWND) {
     unsafe {
-        let dpi_scale = crate::platform::get_system_controller().get_dpi_scale();
+        let dpi_scale = get_indicator_dpi_scale();
         let width = (32.0 * dpi_scale) as i32;
         let height = (32.0 * dpi_scale) as i32;
 
@@ -2179,8 +2234,7 @@ pub fn start_indicator() {
         }
 
         // 5. Create Indicator Window
-        let scale = crate::platform::get_system_controller().get_dpi_scale();
-        let indicator_size = (32.0 * scale) as i32;
+        let indicator_size = (32.0 * get_indicator_dpi_scale()) as i32;
         let hwnd = CreateWindowExW(
             WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
             class_name_wide.as_ptr(),
@@ -2216,6 +2270,7 @@ pub fn start_indicator() {
         let screen_width = GetSystemMetrics(0); // SM_CXSCREEN
         let screen_height = GetSystemMetrics(1); // SM_CYSCREEN
         
+        let scale = crate::platform::get_system_controller().get_dpi_scale();
         let hud_w = (808.0 * scale) as i32;
         let hud_h = (452.0 * scale) as i32;
         let hud_x = (screen_width - hud_w) / 2;
@@ -2699,7 +2754,7 @@ fn calculate_interpolated_pos() -> (f64, f64) {
         windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt);
     }
     
-    let dpi_scale = crate::platform::get_system_controller().get_dpi_scale();
+    let dpi_scale = get_indicator_dpi_scale();
     let target_x = pt.x as f64 - 16.0 * dpi_scale;
     let target_y = pt.y as f64 - 16.0 * dpi_scale;
     
@@ -2813,10 +2868,28 @@ fn update_overlay_window_position(hwnd: HWND, scale_changed_in_loop: bool) {
         (false, false, false)
     };
 
+    static LAST_DPI_SCALE: OnceLock<Mutex<f64>> = OnceLock::new();
+    let current_dpi_scale = get_indicator_dpi_scale();
+    let dpi_changed = {
+        let lock = LAST_DPI_SCALE.get_or_init(|| Mutex::new(0.0));
+        if let Ok(mut last) = lock.lock() {
+            if (*last - current_dpi_scale).abs() > 0.01 {
+                *last = current_dpi_scale;
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    };
+
     let state_changed = check_state_changed(is_dragging, is_scrolling, is_snapped);
-    if state_changed || scale_changed_in_loop {
+    if state_changed || scale_changed_in_loop || dpi_changed {
         unsafe { update_indicator_layered_image(hwnd) };
     }
+
+    let current_size = (32.0 * current_dpi_scale) as i32;
 
     unsafe {
         windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos(
@@ -2824,10 +2897,9 @@ fn update_overlay_window_position(hwnd: HWND, scale_changed_in_loop: bool) {
             windows_sys::Win32::UI::WindowsAndMessaging::HWND_TOPMOST,
             next_x.round() as i32,
             next_y.round() as i32,
-            0,
-            0,
-            windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOSIZE
-                | windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOACTIVATE
+            current_size,
+            current_size,
+            windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOACTIVATE
                 | windows_sys::Win32::UI::WindowsAndMessaging::SWP_SHOWWINDOW,
         );
         windows_sys::Win32::UI::WindowsAndMessaging::BringWindowToTop(hwnd);
