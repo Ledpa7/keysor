@@ -256,10 +256,21 @@ impl KeyboardHook for MacosKeyboardHook {
                             .join("keysor.lock");
                         let _ = std::fs::remove_file(&lock_path);
 
-                        // `open App.app` 는 LaunchServices가 "이미 실행 중"으로 보고
-                        // 새 프로세스를 만들지 않으므로, 바이너리를 직접 실행한다.
+                        // .app 번들 안에서 실행 중인 경우 open -n 으로 번들 식별자(app.keysor.keysor)를 유지하며 재시작
                         if let Ok(exe) = std::env::current_exe() {
-                            let _ = std::process::Command::new(&exe).spawn();
+                            let app_bundle = exe.parent()
+                                .and_then(|p| p.parent())
+                                .and_then(|p| p.parent())
+                                .filter(|p| p.extension().map_or(false, |ext| ext == "app"));
+
+                            if let Some(app_path) = app_bundle {
+                                let _ = std::process::Command::new("open")
+                                    .arg("-n")
+                                    .arg(app_path)
+                                    .spawn();
+                            } else {
+                                let _ = std::process::Command::new(&exe).spawn();
+                            }
                         }
                         std::thread::sleep(std::time::Duration::from_millis(300));
                         std::process::exit(0);
