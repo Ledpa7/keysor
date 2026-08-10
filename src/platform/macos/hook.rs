@@ -161,14 +161,20 @@ extern "C" fn event_tap_callback(
         let flags = unsafe { CGEventGetFlags(event) };
 
         let is_keydown = if keycode == 57 {
-            // Caps Lock (57): macOS 물리적 키 상태를 직접 감지하여 KeyDown과 KeyUp을 정확히 구분
-            unsafe { CGEventSourceKeyState(0, 57) }
+            if etype == K_CG_EVENT_KEY_DOWN {
+                true
+            } else if etype == K_CG_EVENT_KEY_UP {
+                false
+            } else {
+                (flags & 0x10000) != 0
+            }
         } else if etype == K_CG_EVENT_FLAGS_CHANGED {
             let mask = match keycode {
-                56 | 60 => 0x20000, // Shift
-                59 => 0x40000,      // Control
-                58 | 61 => 0x80000, // Option / Alt
-                55 | 54 => 0x100000,// Command / Win
+                56 | 60 => 0x20000,  // Shift
+                59 => 0x40000,       // Control
+                58 | 61 => 0x80000,  // Option / Alt
+                55 | 54 => 0x100000, // Command / Win
+                57 => 0x10000,       // CapsLock
                 _ => 0,
             };
             if mask != 0 {
