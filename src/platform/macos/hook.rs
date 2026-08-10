@@ -249,8 +249,7 @@ impl KeyboardHook for MacosKeyboardHook {
                     std::thread::sleep(std::time::Duration::from_secs(1));
                     if AXIsProcessTrusted() {
                         println!("[Keysor] Accessibility permission granted! Relaunching...");
-                        // 잠금 파일을 먼저 삭제해야 새 프로세스가 중복 실행으로
-                        // 잘못 판단하지 않고 정상 시작할 수 있다.
+                        // 잠금 파일 삭제 → 새 프로세스가 중복 실행으로 오인하지 않도록
                         let home = std::env::var("HOME")
                             .unwrap_or_else(|_| "/tmp".to_string());
                         let lock_path = std::path::Path::new(&home)
@@ -258,15 +257,10 @@ impl KeyboardHook for MacosKeyboardHook {
                             .join("keysor.lock");
                         let _ = std::fs::remove_file(&lock_path);
 
+                        // `open App.app` 는 LaunchServices가 "이미 실행 중"으로 보고
+                        // 새 프로세스를 만들지 않으므로, 바이너리를 직접 실행한다.
                         if let Ok(exe) = std::env::current_exe() {
-                            if let Some(bundle) = exe.parent()
-                                .and_then(|p| p.parent())
-                                .and_then(|p| p.parent())
-                            {
-                                let _ = std::process::Command::new("open")
-                                    .arg(bundle)
-                                    .spawn();
-                            }
+                            let _ = std::process::Command::new(&exe).spawn();
                         }
                         std::thread::sleep(std::time::Duration::from_millis(300));
                         std::process::exit(0);
