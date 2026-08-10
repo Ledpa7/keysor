@@ -393,6 +393,7 @@ static KeysorAppDelegate *g_appDelegate = nil;
 
 void keysor_macos_pump_events(void) {
     @autoreleasepool {
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.001, false);
         NSEvent *event;
         while ((event = [NSApp nextEventMatchingMask:NSEventMaskAny
                                            untilDate:[NSDate distantPast]
@@ -407,7 +408,7 @@ void keysor_macos_pump_events(void) {
 void keysor_macos_ui_init(void) {
     if (g_overlayWindow != nil) return;
 
-    dispatch_async(dispatch_get_main_queue(), ^{
+    void (^initBlock)(void) = ^{
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
         g_appDelegate = [[KeysorAppDelegate alloc] init];
         [NSApp setDelegate:g_appDelegate];
@@ -456,11 +457,17 @@ void keysor_macos_ui_init(void) {
         // 최초 구동 시 팝업 윈도우 화면에 표시
         [g_hudWindow orderFrontRegardless];
         NSLog(@"[Keysor Native ObjC UI] Keysor Overlay Window & HUD Settings Popup Window initialized successfully.");
-    });
+    };
+
+    if ([NSThread isMainThread]) {
+        initBlock();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), initBlock);
+    }
 }
 
 void keysor_macos_ui_show(bool visible) {
-    dispatch_async(dispatch_get_main_queue(), ^{
+    void (^showBlock)(void) = ^{
         if (g_overlayWindow == nil) return;
         if (visible) {
             [g_overlayWindow setAlphaValue:0.95];
@@ -474,18 +481,30 @@ void keysor_macos_ui_show(bool visible) {
         } else {
             [g_overlayWindow orderOut:nil];
         }
-    });
+    };
+
+    if ([NSThread isMainThread]) {
+        showBlock();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), showBlock);
+    }
 }
 
 void keysor_macos_ui_update_pos(double x, double y) {
-    dispatch_async(dispatch_get_main_queue(), ^{
+    void (^posBlock)(void) = ^{
         if (g_overlayWindow == nil) return;
         NSRect displayBounds = [[NSScreen mainScreen] frame];
         double screen_h = displayBounds.size.height;
         // 커서 핫스팟 (16, 16) 정밀 동기화
         NSPoint origin = NSMakePoint(x - 16.0, screen_h - y - 20.0);
         [g_overlayWindow setFrameOrigin:origin];
-    });
+    };
+
+    if ([NSThread isMainThread]) {
+        posBlock();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), posBlock);
+    }
 }
 
 void keysor_macos_ui_set_click_motion(int clickType) {
