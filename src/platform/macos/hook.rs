@@ -161,13 +161,8 @@ extern "C" fn event_tap_callback(
         let flags = unsafe { CGEventGetFlags(event) };
 
         let is_keydown = if keycode == 57 {
-            if etype == K_CG_EVENT_KEY_DOWN {
-                true
-            } else if etype == K_CG_EVENT_KEY_UP {
-                false
-            } else {
-                (flags & 0x10000) != 0
-            }
+            // Caps Lock (57): 누를 때마다 is_keydown = true로 전달하여 ON/OFF 토글이 100% 안정적으로 동작
+            true
         } else if etype == K_CG_EVENT_FLAGS_CHANGED {
             let mask = match keycode {
                 56 | 60 => 0x20000,  // Shift
