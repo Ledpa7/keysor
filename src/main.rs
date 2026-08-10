@@ -56,10 +56,12 @@ fn main() {
         }
     }
     
+    let config_path = config::get_config_path();
+
     println!("====================================================");
     println!("      키서 (Keysor) - 초안정성 마우스 제어 유틸리티");
     println!("====================================================");
-    println!("설정 파일: C:\\Users\\wjdwl\\.keysor\\keysor.yaml");
+    println!("설정 파일: {}", config_path.display());
     println!("조작 가이드:");
     println!("  - [Caps Lock] (지속 홀드)  : 마우스 제어 모드 활성화");
     println!("  - [Caps Lock] (단독 탭)     : 본래의 대소문자 고정(Toggle) 기능 작동");
@@ -68,8 +70,6 @@ fn main() {
     println!("  - [우클릭 홀드]              : Space 지속 홀드 (손 뗄 시 우클릭 해제)");
     println!("  - [보조 클릭/스크롤]         : R (휠 위로), F (휠 아래로), G / Right-Shift (우클릭)");
     println!("====================================================");
-
-    let config_path = config::get_config_path();
 
     // 1. 초기 설정 로드 (오류 시 자동 디폴트 내장 설정 폴백 작동)
     let config = config::load_config(&config_path);
@@ -111,7 +111,17 @@ fn main() {
     let mut last_modified = get_modified_time(&config_path).unwrap_or(SystemTime::now());
 
     loop {
-        thread::sleep(Duration::from_millis(100)); // 100ms 주기로 경량 폴링
+        #[cfg(target_os = "macos")]
+        unsafe {
+            #[link(name = "CoreFoundation", kind = "framework")]
+            unsafe extern "C" {
+                fn CFRunLoopRunInMode(mode: *const std::ffi::c_void, seconds: f64, returnAfterSourceHandled: bool) -> i32;
+                static kCFRunLoopDefaultMode: *const std::ffi::c_void;
+            }
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false);
+        }
+        #[cfg(not(target_os = "macos"))]
+        thread::sleep(Duration::from_millis(100));
 
         // A. 포커스 전환에 의한 키보드 오작동 엉킴 방지 실시간 동기화 가드
         hook::modifier_sync_guard();

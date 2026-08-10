@@ -10,7 +10,7 @@ struct CGPoint {
 
 // macOS CoreGraphics 프레임워크 동적 링킹 선언
 #[link(name = "CoreGraphics", kind = "framework")]
-extern "C" {
+unsafe extern "C" {
     fn CGEventCreate(source: *mut c_void) -> *mut c_void;
     fn CGEventGetLocation(event: *mut c_void) -> CGPoint;
     fn CGEventCreateMouseEvent(
@@ -32,7 +32,7 @@ extern "C" {
 }
 
 // CoreGraphics 마우스 이벤트 타입 상수
-const K_CG_HID_EVENT_TAP: u32 = 0;
+const K_CG_SESSION_EVENT_TAP: u32 = 1;
 
 const K_CG_EVENT_LEFT_MOUSE_DOWN: u32 = 1;
 const K_CG_EVENT_LEFT_MOUSE_UP: u32 = 2;
@@ -56,12 +56,54 @@ impl MacosSystemController {
         unsafe {
             let event = CGEventCreateMouseEvent(std::ptr::null_mut(), mouse_type, pos, button);
             if !event.is_null() {
-                CGEventPost(K_CG_HID_EVENT_TAP, event);
+                CGEventPost(K_CG_SESSION_EVENT_TAP, event);
                 CFRelease(event);
             }
         }
     }
+
+    // 특정 키보드 입력 이벤트를 합성 전송하는 헬퍼 함수
+    fn post_key_event(&self, keycode: u16, flags: u64) {
+        unsafe {
+            unsafe extern "C" {
+                fn CGEventCreateKeyboardEvent(source: *mut c_void, virtualKey: u16, keyDown: bool) -> *mut c_void;
+                fn CGEventSetFlags(event: *mut c_void, flags: u64);
+                fn CGEventSetIntegerValueField(event: *mut c_void, field: u32, value: i64);
+            }
+            let down = CGEventCreateKeyboardEvent(std::ptr::null_mut(), keycode, true);
+            if !down.is_null() {
+                CGEventSetIntegerValueField(down, 42, 0x4B455953); // K_CG_EVENT_SOURCE_USER_DATA = 42, KEYSOR_MAGIC = 0x4B455953
+                if flags != 0 {
+                    CGEventSetFlags(down, flags);
+                }
+                CGEventPost(K_CG_SESSION_EVENT_TAP, down);
+                CFRelease(down);
+            }
+            let up = CGEventCreateKeyboardEvent(std::ptr::null_mut(), keycode, false);
+            if !up.is_null() {
+                CGEventSetIntegerValueField(up, 42, 0x4B455953); // K_CG_EVENT_SOURCE_USER_DATA = 42, KEYSOR_MAGIC = 0x4B455953
+                if flags != 0 {
+                    CGEventSetFlags(up, flags);
+                }
+                CGEventPost(K_CG_SESSION_EVENT_TAP, up);
+                CFRelease(up);
+            }
+        }
+    }
+
+    pub fn is_caps_lock_on(&self) -> bool {
+        unsafe {
+            unsafe extern "C" {
+                fn CGEventSourceFlagsState(stateID: u32) -> u64;
+            }
+            // stateID 1 = K_CG_EVENT_SOURCE_STATE_COMBINED_SESSION_STATE
+            // 0x00010000 = K_CG_EVENT_FLAG_MASK_ALPHA_SHIFT (Caps Lock)
+            (CGEventSourceFlagsState(1) & 0x00010000) != 0
+        }
+    }
 }
+
+const K_CG_EVENT_MOUSE_MOVED: u32 = 5;
 
 impl SystemController for MacosSystemController {
     fn get_cursor_pos(&self) -> (i32, i32) {
@@ -80,7 +122,13 @@ impl SystemController for MacosSystemController {
     fn set_cursor_pos(&self, x: i32, y: i32) -> bool {
         unsafe {
             let pos = CGPoint { x: x as f64, y: y as f64 };
-            CGWarpMouseCursorPosition(pos) == 0
+            let res = CGWarpMouseCursorPosition(pos) == 0;
+            let event = CGEventCreateMouseEvent(std::ptr::null_mut(), K_CG_EVENT_MOUSE_MOVED, pos, K_CG_MOUSE_BUTTON_LEFT);
+            if !event.is_null() {
+                CGEventPost(K_CG_SESSION_EVENT_TAP, event);
+                CFRelease(event);
+            }
+            res
         }
     }
 
@@ -135,14 +183,22 @@ impl SystemController for MacosSystemController {
 
     fn scroll(&self, amount: i32) {
         unsafe {
+            // R/F 키 스크롤 이동 속도 3배 가속 적용
+            let scaled_amount = if amount > 0 {
+                (amount * 3 / 10).max(1)
+            } else if amount < 0 {
+                (amount * 3 / 10).min(-1)
+            } else {
+                0
+            };
             let event = CGEventCreateScrollWheelEvent(
                 std::ptr::null_mut(),
                 0,
                 1,
-                amount / 10,
+                scaled_amount,
             );
             if !event.is_null() {
-                CGEventPost(K_CG_HID_EVENT_TAP, event);
+                CGEventPost(K_CG_SESSION_EVENT_TAP, event);
                 CFRelease(event);
             }
         }
@@ -150,15 +206,22 @@ impl SystemController for MacosSystemController {
 
     fn scroll_horizontal(&self, amount: i32) {
         unsafe {
+            let scaled_amount = if amount > 0 {
+                (amount * 3 / 10).max(1)
+            } else if amount < 0 {
+                (amount * 3 / 10).min(-1)
+            } else {
+                0
+            };
             let event = CGEventCreateScrollWheelEvent(
                 std::ptr::null_mut(),
                 0,
                 2,
                 0,
-                amount / 10,
+                scaled_amount,
             );
             if !event.is_null() {
-                CGEventPost(K_CG_HID_EVENT_TAP, event);
+                CGEventPost(K_CG_SESSION_EVENT_TAP, event);
                 CFRelease(event);
             }
         }
@@ -168,14 +231,74 @@ impl SystemController for MacosSystemController {
         1.0
     }
 
-    fn register_startup(&self, _active: bool) -> Result<(), String> {
-        Ok(())
+    fn register_startup(&self, active: bool) -> Result<(), String> {
+        let mut plist_path = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+        plist_path.push("Library");
+        plist_path.push("LaunchAgents");
+        plist_path.push("com.keysor.app.plist");
+
+        if active {
+            if let Ok(exe_path) = std::env::current_exe() {
+                if let Some(parent) = plist_path.parent() {
+                    std::fs::create_dir_all(parent).ok();
+                }
+                let content = format!(
+                    r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.keysor.app</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>"#,
+                    exe_path.to_string_lossy()
+                );
+                std::fs::write(&plist_path, content).map_err(|e| e.to_string())
+            } else {
+                Err("Cannot retrieve current executable path".to_string())
+            }
+        } else {
+            if plist_path.exists() {
+                std::fs::remove_file(&plist_path).map_err(|e| e.to_string())
+            } else {
+                Ok(())
+            }
+        }
     }
 
-    fn simulate_browser_navigation(&self, _forward: bool) {}
-    fn simulate_virtual_desktop_navigation(&self, _forward: bool) {}
-    fn simulate_page_jump(&self, _top: bool) {}
-    fn simulate_tab_navigation(&self, _forward: bool) {}
+    fn simulate_browser_navigation(&self, forward: bool) {
+        // macOS: Cmd + ] (Forward, keycode 30) / Cmd + [ (Back, keycode 33)
+        let keycode = if forward { 30 } else { 33 };
+        self.post_key_event(keycode, 0x00100000); // K_CG_EVENT_FLAG_MASK_COMMAND
+    }
+
+    fn simulate_virtual_desktop_navigation(&self, forward: bool) {
+        // macOS Spaces: Ctrl + Right Arrow (keycode 124) / Ctrl + Left Arrow (keycode 123)
+        let keycode = if forward { 124 } else { 123 };
+        self.post_key_event(keycode, 0x00040000); // K_CG_EVENT_FLAG_MASK_CONTROL
+    }
+
+    fn simulate_page_jump(&self, top: bool) {
+        let amount = if top { 1000 } else { -1000 };
+        self.scroll(amount);
+    }
+
+    fn simulate_tab_navigation(&self, forward: bool) {
+        // macOS: Ctrl + Tab (keycode 48) / Ctrl + Shift + Tab (keycode 48 with Ctrl+Shift flags)
+        if forward {
+            self.post_key_event(48, 0x00040000);
+        } else {
+            self.post_key_event(48, 0x00040000 | 0x00020000);
+        }
+    }
 
     fn run_app(&self, app_path: &str) -> Result<(), String> {
         std::process::Command::new("open")
@@ -185,8 +308,19 @@ impl SystemController for MacosSystemController {
             .map_err(|e| e.to_string())
     }
 
-    fn ensure_caps_lock_off(&self) {}
-    fn inject_caps_lock_toggle(&self) {}
+    fn ensure_caps_lock_off(&self) {
+        if self.is_caps_lock_on() {
+            self.inject_caps_lock_toggle();
+        }
+    }
+
+    fn is_caps_lock_on(&self) -> bool {
+        Self::is_caps_lock_on(self)
+    }
+
+    fn inject_caps_lock_toggle(&self) {
+        self.post_key_event(57, 0);
+    }
 
     fn beep(&self) {
         print!("\x07");

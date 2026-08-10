@@ -25,6 +25,7 @@ uiautomation = "0.25.0"
 
 [build-dependencies]
 embed-resource = "2.5.0"
+cc = "1.0"
 
 [[bin]]
 name = "test_uia"

@@ -392,6 +392,7 @@ dependencies = [
 name = "keysor"
 version = "1.0.1"
 dependencies = [
+ "cc",
  "embed-resource",
  "serde",
  "serde_json",

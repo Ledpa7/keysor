@@ -26,9 +26,12 @@ fn show_alert(_title: &str, _message: &str) {}
 
 /// .keysor 디렉토리 경로 획득
 fn get_keysor_dir() -> PathBuf {
-    let mut path = std::env::var("USERPROFILE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."));
+    #[cfg(windows)]
+    let base = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME"));
+    #[cfg(not(windows))]
+    let base = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"));
+
+    let mut path = base.map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("."));
     path.push(".keysor");
     if !path.exists() {
         fs::create_dir_all(&path).ok();
@@ -57,9 +60,9 @@ fn deobfuscate(data: &[u8]) -> Option<String> {
 static MACHINE_ID_CACHE: OnceLock<String> = OnceLock::new();
 
 /// Windows 시스템 고유 머신 ID (MachineGuid) 획득
+#[cfg(windows)]
 pub fn get_machine_id() -> String {
     MACHINE_ID_CACHE.get_or_init(|| {
-        // reg query를 이용하여 Cryptography MachineGuid 추출
         let output = std::process::Command::new("reg")
             .args(&["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid"])
             .output();
@@ -75,10 +78,33 @@ pub fn get_machine_id() -> String {
             }
         }
 
-        // reg query 실패 시 폴백 (컴퓨터 명 + 사용자 경로 해시값 모방)
         let comp_name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "unknown_pc".to_string());
         let user_profile = std::env::var("USERPROFILE").unwrap_or_else(|_| "unknown_user".to_string());
         format!("{}_{}", comp_name, user_profile.len())
+    }).clone()
+}
+
+/// macOS 시스템 고유 머신 ID (IOPlatformUUID) 획득
+#[cfg(not(windows))]
+pub fn get_machine_id() -> String {
+    MACHINE_ID_CACHE.get_or_init(|| {
+        if let Ok(output) = std::process::Command::new("ioreg").args(&["-rd1", "-c", "IOPlatformExpertDevice"]).output() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                if line.contains("IOPlatformUUID") {
+                    if let Some(pos) = line.find('"') {
+                        let rest = &line[pos + 1..];
+                        if let Some(end) = rest.rfind('"') {
+                            let uuid = &rest[..end];
+                            if !uuid.is_empty() {
+                                return uuid.trim().to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        "MACOS-FALLBACK-DEVICE-ID".to_string()
     }).clone()
 }
 

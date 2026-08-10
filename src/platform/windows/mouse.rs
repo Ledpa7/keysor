@@ -477,31 +477,14 @@ impl SystemController for WindowsSystemController {
     }
 
     fn ensure_caps_lock_off(&self) {
+        if self.is_caps_lock_on() {
+            self.inject_caps_lock_toggle();
+        }
+    }
+
+    fn is_caps_lock_on(&self) -> bool {
         unsafe {
-            let state = windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyState(0x14); // VK_CAPITAL = 0x14
-            if (state & 0x0001) != 0 {
-                let mut inputs = [
-                    INPUT { r#type: INPUT_KEYBOARD, Anonymous: std::mem::zeroed() },
-                    INPUT { r#type: INPUT_KEYBOARD, Anonymous: std::mem::zeroed() },
-                ];
-
-                inputs[0].Anonymous.ki = KEYBDINPUT {
-                    wVk: 0x14,
-                    wScan: 0x3A,
-                    dwFlags: 0,
-                    time: 0,
-                    dwExtraInfo: KEYSOR_SIGNATURE,
-                };
-                inputs[1].Anonymous.ki = KEYBDINPUT {
-                    wVk: 0x14,
-                    wScan: 0x3A,
-                    dwFlags: KEYEVENTF_KEYUP,
-                    time: 0,
-                    dwExtraInfo: KEYSOR_SIGNATURE,
-                };
-
-                SendInput(2, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32);
-            }
+            (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyState(0x14) & 0x0001) != 0
         }
     }
 

@@ -73,9 +73,12 @@ impl Default for Config {
 }
 
 pub fn get_config_path() -> PathBuf {
-    let mut path = std::env::var("USERPROFILE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."));
+    #[cfg(windows)]
+    let base = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME"));
+    #[cfg(not(windows))]
+    let base = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"));
+
+    let mut path = base.map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("."));
     path.push(".keysor");
     if !path.exists() {
         std::fs::create_dir_all(&path).ok();
@@ -176,12 +179,15 @@ bindings:
                 let msg_wide: Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
                 let title_wide: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
                 
+                #[cfg(windows)]
                 windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
                     0,
                     msg_wide.as_ptr(),
                     title_wide.as_ptr(),
                     0x30, // MB_ICONWARNING
                 );
+                #[cfg(not(windows))]
+                eprintln!("[{}] {}", title, msg);
             }
             
             default_cfg

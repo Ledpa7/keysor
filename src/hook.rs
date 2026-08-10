@@ -297,14 +297,14 @@ fn process_mouse_scrolling(
         };
         let elapsed = start_time.elapsed().as_secs_f64();
 
-        // 200ms 지연 후 지속적 가속 스크롤 활성화 (단일 탭 지원용)
-        if elapsed >= 0.200 {
-            let scroll_elapsed = elapsed - 0.200;
+        // 50ms 지연 후 즉각적 폭발 가속 스크롤 활성화
+        if elapsed >= 0.050 {
+            let scroll_elapsed = elapsed - 0.050;
             
-            let base_scroll = 720.0; // 초당 6 notches (720 delta/sec)
-            let max_scroll = 7200.0; // 초당 60 notches (7200 delta/sec)
-            let accel_factor = 2.0;
-            let speed = (base_scroll + scroll_elapsed * accel_factor * 600.0).min(max_scroll);
+            let base_scroll = 2160.0; // 초당 18 notches (2160 delta/sec)
+            let max_scroll = 21600.0; // 초당 180 notches (21600 delta/sec)
+            let accel_factor = 6.0;
+            let speed = (base_scroll + scroll_elapsed * accel_factor * 1800.0).min(max_scroll);
             
             let scroll_amount_y = speed * params.sdy * dt + *remainder_scroll_y;
             let scroll_amount_x = speed * params.sdx * dt + *remainder_scroll_x;
@@ -380,6 +380,7 @@ fn start_movement_thread(state_ptr: Arc<Mutex<AppState>>) {
                 crate::indicator::check_global_magnetic_snapping();
                 was_mouse_mode = true;
             } else if was_mouse_mode {
+                #[cfg(windows)]
                 crate::ui::win_gdi::force_restore_system_cursor();
                 was_mouse_mode = false;
             }
@@ -526,7 +527,7 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
         if event.is_keydown {
             let should_process = match state.caps_lock_press_time {
                 None => true,
-                Some(t) => t.elapsed() > Duration::from_millis(200),
+                Some(t) => t.elapsed() > Duration::from_millis(150),
             };
 
             if should_process {
@@ -534,20 +535,10 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
                 state.caps_lock_used_as_modifier = false;
 
                 if is_toggle_mode {
-                    // CapsLock 현재 상태 읽기: keydown 직전이므로 현재값이 아직 변경 전
-                    // GetKeyState 하위 비트(0x0001): 토글 상태 (1=ON, 0=OFF)
-                    let caps_currently_on = unsafe {
-                        (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyState(0x14) & 0x0001) != 0
-                    };
-                    // keydown 이후 CapsLock 상태가 반전되므로:
-                    // 현재 OFF → 눌리면 ON → Keysor 켜기
-                    // 현재 ON  → 눌리면 OFF → Keysor 끄기
-                    if caps_currently_on {
-                        // CapsLock이 OFF로 전환될 것 → Keysor 끄기
+                    if state.is_mouse_mode {
                         state.deactivate_mouse_mode();
                         indicator_action = IndicatorAction::Hide;
                     } else {
-                        // CapsLock이 ON으로 전환될 것 → Keysor 켜기
                         state.is_mouse_mode = true;
                         indicator_action = IndicatorAction::Show;
                     }
@@ -567,6 +558,7 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
                 indicator_action = IndicatorAction::Hide;
             }
 
+            #[cfg(windows)]
             if elapsed < Duration::from_millis(250) && !used_modifier {
                 should_inject = true;
             }
@@ -725,6 +717,7 @@ fn process_movement_and_actions(
     // 일반 이동 및 보조 클릭 가로채기 매칭
     if let Some(action) = state.vk_bindings.get(&vk_code) {
         state.caps_lock_used_as_modifier = true;
+        #[cfg(windows)]
         crate::ui::win_gdi::SUSPEND_CURSOR_HIDE.store(false, Ordering::SeqCst);
 
         if is_keydown {
@@ -822,9 +815,12 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
         if event.vk_code == 0x09 && event.is_keydown {
             if let Ok(state) = state_arc.try_lock() {
                 if state.win_pressed || state.alt_pressed {
-                    crate::ui::win_gdi::SUSPEND_CURSOR_HIDE.store(true, Ordering::SeqCst);
-                    unsafe {
-                        crate::ui::win_gdi::force_restore_system_cursor();
+                    #[cfg(windows)]
+                    {
+                        crate::ui::win_gdi::SUSPEND_CURSOR_HIDE.store(true, Ordering::SeqCst);
+                        unsafe {
+                            crate::ui::win_gdi::force_restore_system_cursor();
+                        }
                     }
                 }
             }
@@ -835,6 +831,7 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
             && event.vk_code != 0x5B && event.vk_code != 0x5C 
             && event.vk_code != 0x12 && event.vk_code != 0xA4 && event.vk_code != 0xA5
             && event.vk_code != 0x11 && event.vk_code != 0xA2 && event.vk_code != 0xA3 {
+            #[cfg(windows)]
             crate::ui::win_gdi::SUSPEND_CURSOR_HIDE.store(false, Ordering::SeqCst);
         }
 
@@ -1001,6 +998,7 @@ pub fn cleanup_hook() {
         hook.stop_listening();
     }
     // Restore system cursor on exit if it was hidden
+    #[cfg(windows)]
     crate::ui::win_gdi::restore_system_cursor();
 }
 

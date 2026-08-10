@@ -50,6 +50,7 @@ pub trait SystemController: Send + Sync + 'static {
     fn simulate_tab_navigation(&self, forward: bool);
     fn run_app(&self, app_path: &str) -> Result<(), String>;
     fn ensure_caps_lock_off(&self);
+    fn is_caps_lock_on(&self) -> bool;
     fn inject_caps_lock_toggle(&self);
     fn beep(&self);
 }
