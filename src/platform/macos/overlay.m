@@ -409,7 +409,7 @@ void keysor_macos_ui_init(void) {
     if (g_overlayWindow != nil) return;
 
     void (^initBlock)(void) = ^{
-        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
         g_appDelegate = [[KeysorAppDelegate alloc] init];
         [NSApp setDelegate:g_appDelegate];
 
@@ -423,10 +423,10 @@ void keysor_macos_ui_init(void) {
         [g_overlayWindow setBackgroundColor:[NSColor clearColor]];
         [g_overlayWindow setOpaque:NO];
         [g_overlayWindow setHasShadow:NO];
-        [g_overlayWindow setLevel:NSStatusWindowLevel]; // 25
+        [g_overlayWindow setLevel:NSScreenSaverWindowLevel]; // 1000 (Topmost ScreenSaver Level)
         [g_overlayWindow setHidesOnDeactivate:NO];
         [g_overlayWindow setCanHide:NO];
-        [g_overlayWindow setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary];
+        [g_overlayWindow setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle];
         [g_overlayWindow setIgnoresMouseEvents:YES];
 
         g_cursorView = [[KeysorCursorView alloc] initWithFrame:frame];
@@ -471,6 +471,7 @@ void keysor_macos_ui_show(bool visible) {
         if (g_overlayWindow == nil) return;
         if (visible) {
             [g_overlayWindow setAlphaValue:0.95];
+            [g_overlayWindow setLevel:NSScreenSaverWindowLevel];
             [g_overlayWindow orderFrontRegardless];
             [g_overlayWindow display];
 
