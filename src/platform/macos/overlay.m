@@ -423,6 +423,7 @@ void keysor_macos_ui_init(void) {
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
         g_appDelegate = [[KeysorAppDelegate alloc] init];
         [NSApp setDelegate:g_appDelegate];
+        [NSApp finishLaunching];
 
         [[NSDistributedNotificationCenter defaultCenter] addObserverForName:@"KeysorShowHudNotification"
                                                                       object:nil
