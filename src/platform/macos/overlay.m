@@ -424,17 +424,12 @@ void keysor_macos_ui_show(bool visible) {
             [g_overlayWindow orderFrontRegardless];
             [g_overlayWindow display];
 
-            // 마우스 모드 활성화 시 HUD 팝업 윈도우 자동 최소화/숨김
+            // 마우스 모드 활성화 시 HUD 팝업 윈도우 가리기
             if (g_hudWindow != nil) {
                 [g_hudWindow orderOut:nil];
             }
         } else {
             [g_overlayWindow orderOut:nil];
-
-            // 마우스 모드 해제 시 HUD 팝업 윈도우 자동 복원
-            if (g_hudWindow != nil) {
-                [g_hudWindow orderFrontRegardless];
-            }
         }
     });
 }
