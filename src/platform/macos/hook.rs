@@ -231,51 +231,60 @@ impl KeyboardHook for MacosKeyboardHook {
         &self,
         callback: Box<dyn Fn(KeyEvent) -> HookResult + Send + Sync + 'static>,
     ) -> Result<(), String> {
-        // macOS Accessibility(손쉬운 사용) 권한 체크
-        unsafe {
-            if !AXIsProcessTrusted() {
-                eprintln!("[Error] Keysor does not have Accessibility permissions. Prompting user...");
-                let _ = std::process::Command::new("open")
-                    .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-                    .spawn();
-                return Err("Accessibility permission is required. Opened System Preferences.".to_string());
-            }
-        }
-
         {
             let mut cb = GLOBAL_CALLBACK.lock().unwrap();
             *cb = Some(callback);
         }
 
+        // 손쉬운 사용 권한이 없으면 시스템 설정을 열고, 권한이 부여될 때까지
+        // 1초마다 자동으로 재시도하여 EventTap을 생성합니다.
         std::thread::spawn(|| unsafe {
-            let event_mask = (1u64 << K_CG_EVENT_KEY_DOWN) | (1u64 << K_CG_EVENT_KEY_UP) | (1u64 << K_CG_EVENT_FLAGS_CHANGED);
-            
-            // 원격 데스크톱(VNC, Screen Sharing, AnyDesk 등) 및 세션 이벤트를 모두 가로채기 위해
-            // K_CG_SESSION_EVENT_TAP (1) 우선 생성
-            let mut port = CGEventTapCreate(
-                K_CG_SESSION_EVENT_TAP,
-                K_CG_HEAD_INSERT_EVENT_TAP,
-                K_CG_EVENT_TAP_OPTION_DEFAULT,
-                event_mask,
-                event_tap_callback,
-                std::ptr::null_mut(),
-            );
+            // 권한 획득 대기 루프
+            if !AXIsProcessTrusted() {
+                eprintln!("[Keysor] Waiting for Accessibility permission...");
+                let _ = std::process::Command::new("open")
+                    .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+                    .spawn();
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    if AXIsProcessTrusted() {
+                        println!("[Keysor] Accessibility permission granted! Starting EventTap...");
+                        break;
+                    }
+                }
+            }
 
-            if port.is_null() {
-                // Session Tap 실패 시 HID Tap으로 폴백
+            let event_mask = (1u64 << K_CG_EVENT_KEY_DOWN) | (1u64 << K_CG_EVENT_KEY_UP) | (1u64 << K_CG_EVENT_FLAGS_CHANGED);
+
+            // EventTap 생성도 권한 부여 직후 실패할 수 있으므로 재시도
+            let mut port;
+            loop {
                 port = CGEventTapCreate(
-                    K_CG_HID_EVENT_TAP,
+                    K_CG_SESSION_EVENT_TAP,
                     K_CG_HEAD_INSERT_EVENT_TAP,
                     K_CG_EVENT_TAP_OPTION_DEFAULT,
                     event_mask,
                     event_tap_callback,
                     std::ptr::null_mut(),
                 );
-            }
 
-            if port.is_null() {
-                eprintln!("[Error] Failed to create CGEventTap despite trusted status.");
-                return;
+                if port.is_null() {
+                    port = CGEventTapCreate(
+                        K_CG_HID_EVENT_TAP,
+                        K_CG_HEAD_INSERT_EVENT_TAP,
+                        K_CG_EVENT_TAP_OPTION_DEFAULT,
+                        event_mask,
+                        event_tap_callback,
+                        std::ptr::null_mut(),
+                    );
+                }
+
+                if !port.is_null() {
+                    break;
+                }
+
+                eprintln!("[Keysor] CGEventTap creation failed, retrying in 1s...");
+                std::thread::sleep(std::time::Duration::from_secs(1));
             }
 
             EVENT_TAP_PORT = port;
