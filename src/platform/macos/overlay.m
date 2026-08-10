@@ -422,8 +422,10 @@ void keysor_macos_ui_init(void) {
         [g_overlayWindow setBackgroundColor:[NSColor clearColor]];
         [g_overlayWindow setOpaque:NO];
         [g_overlayWindow setHasShadow:NO];
-        [g_overlayWindow setLevel:NSStatusWindowLevel]; // 25
-        [g_overlayWindow setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary];
+        [g_overlayWindow setLevel:NSScreenSaverWindowLevel]; // 1000 (Topmost Overlay Level)
+        [g_overlayWindow setHidesOnDeactivate:NO];
+        [g_overlayWindow setCanHide:NO];
+        [g_overlayWindow setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle];
         [g_overlayWindow setIgnoresMouseEvents:YES];
 
         g_cursorView = [[KeysorCursorView alloc] initWithFrame:frame];
@@ -443,6 +445,7 @@ void keysor_macos_ui_init(void) {
         [g_hudWindow setOpaque:NO];
         [g_hudWindow setHasShadow:YES];
         [g_hudWindow setLevel:NSStatusWindowLevel]; // 25
+        [g_hudWindow setHidesOnDeactivate:NO];
         [g_hudWindow setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary];
 
         g_hudView = [[KeysorHudView alloc] initWithFrame:NSMakeRect(0, 0, 808.0, 452.0)];
@@ -460,7 +463,8 @@ void keysor_macos_ui_show(bool visible) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (g_overlayWindow == nil) return;
         if (visible) {
-            [g_overlayWindow setAlphaValue:0.95];
+            [g_overlayWindow setAlphaValue:1.0];
+            [g_overlayWindow setLevel:NSScreenSaverWindowLevel];
             [g_overlayWindow orderFrontRegardless];
             [g_overlayWindow display];
 
