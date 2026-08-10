@@ -113,12 +113,11 @@ fn main() {
     loop {
         #[cfg(target_os = "macos")]
         unsafe {
-            #[link(name = "CoreFoundation", kind = "framework")]
             unsafe extern "C" {
-                fn CFRunLoopRunInMode(mode: *const std::ffi::c_void, seconds: f64, returnAfterSourceHandled: bool) -> i32;
-                static kCFRunLoopDefaultMode: *const std::ffi::c_void;
+                fn keysor_macos_pump_events();
             }
-            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false);
+            keysor_macos_pump_events();
+            thread::sleep(Duration::from_millis(30));
         }
         #[cfg(not(target_os = "macos"))]
         thread::sleep(Duration::from_millis(100));

@@ -371,6 +371,13 @@ static KeysorHudView *g_hudView = nil;
 
 @implementation KeysorAppDelegate
 
+- (void)applicationDidBecomeActive:(NSNotification *)notification {
+    if (g_hudWindow != nil) {
+        [g_hudWindow makeKeyAndOrderFront:nil];
+        [g_hudWindow orderFrontRegardless];
+    }
+}
+
 - (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)flag {
     if (g_hudWindow != nil) {
         [g_hudWindow makeKeyAndOrderFront:nil];
@@ -383,6 +390,19 @@ static KeysorHudView *g_hudView = nil;
 @end
 
 static KeysorAppDelegate *g_appDelegate = nil;
+
+void keysor_macos_pump_events(void) {
+    @autoreleasepool {
+        NSEvent *event;
+        while ((event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                                           untilDate:[NSDate distantPast]
+                                              inMode:NSDefaultRunLoopMode
+                                             dequeue:YES])) {
+            [NSApp sendEvent:event];
+            [NSApp updateWindows];
+        }
+    }
+}
 
 void keysor_macos_ui_init(void) {
     if (g_overlayWindow != nil) return;
