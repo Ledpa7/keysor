@@ -446,7 +446,7 @@ void keysor_macos_ui_init(void) {
     if (g_overlayWindow != nil) return;
 
     void (^initBlock)(void) = ^{
-        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
         g_appDelegate = [[KeysorAppDelegate alloc] init];
         [NSApp setDelegate:g_appDelegate];
 
