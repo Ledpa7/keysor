@@ -18,81 +18,79 @@ extern void keysor_macos_on_speed_change(double delta);
 
     CGContextClearRect(ctx, dirtyRect);
 
-    // 1. 검정 고대비 외곽 테두리 (4.0pt, 라운드 캡/조인)
+    // Tip point: (16, 48)
+    CGFloat tipX = 16.0;
+    CGFloat tipY = 48.0;
+
+    // 1. 커서 위치 명확 유도용 시그니처 네온 링 (Neon Halo Ring)
     CGContextSaveGState(ctx);
-    CGContextSetLineWidth(ctx, 4.0);
-    CGContextSetLineCap(ctx, kCGLineCapRound);
+    CGContextSetLineWidth(ctx, 3.0);
+    if (self.cursorState == 1) { // Left Click / Space: Bright Red/Orange
+        CGContextSetRGBStrokeColor(ctx, 1.0, 0.27, 0.0, 0.95);
+        CGContextSetRGBFillColor(ctx, 1.0, 0.27, 0.0, 0.30);
+    } else if (self.cursorState == 2) { // Right Click: Yellow/Gold
+        CGContextSetRGBStrokeColor(ctx, 1.0, 0.85, 0.0, 0.95);
+        CGContextSetRGBFillColor(ctx, 1.0, 0.85, 0.0, 0.30);
+    } else if (self.cursorState == 3) { // Scroll: Cyan
+        CGContextSetRGBStrokeColor(ctx, 0.0, 0.9, 1.0, 0.95);
+        CGContextSetRGBFillColor(ctx, 0.0, 0.9, 1.0, 0.30);
+    } else { // Normal Mode: Signature Neon Green
+        CGContextSetRGBStrokeColor(ctx, 0.18, 1.0, 0.68, 0.95);
+        CGContextSetRGBFillColor(ctx, 0.18, 1.0, 0.68, 0.30);
+    }
+    // Tip 주변 반경 18pt 시그니처 조명 링
+    CGRect ringRect = CGRectMake(tipX - 18.0, tipY - 18.0, 36.0, 36.0);
+    CGContextFillEllipseInRect(ctx, ringRect);
+    CGContextStrokeEllipseInRect(ctx, ringRect);
+    CGContextRestoreGState(ctx);
+
+    // 2. 키서 정품 솔리드 화살표 포인터 (Filled Solid Pointer)
+    CGMutablePathRef arrowPath = CGPathCreateMutable();
+    CGPathMoveToPoint(arrowPath, NULL, tipX, tipY);               // (16, 48) Tip
+    CGPathAddLineToPoint(arrowPath, NULL, tipX + 20.0, tipY - 20.0); // (36, 28) Right wing
+    CGPathAddLineToPoint(arrowPath, NULL, tipX + 10.0, tipY - 15.0); // (26, 33) Notch
+    CGPathAddLineToPoint(arrowPath, NULL, tipX + 15.0, tipY - 30.0); // (31, 18) Tail right
+    CGPathAddLineToPoint(arrowPath, NULL, tipX + 8.0,  tipY - 32.0); // (24, 16) Tail stem
+    CGPathAddLineToPoint(arrowPath, NULL, tipX + 4.0,  tipY - 18.0); // (20, 30) Notch left
+    CGPathAddLineToPoint(arrowPath, NULL, tipX,        tipY - 24.0); // (16, 24) Left wing
+    CGPathCloseSubpath(arrowPath);
+
+    // 외곽 선명한 검정 고대비 테두리 (Stroke)
+    CGContextSaveGState(ctx);
+    CGContextAddPath(ctx, arrowPath);
+    CGContextSetLineWidth(ctx, 3.5);
     CGContextSetLineJoin(ctx, kCGLineJoinRound);
     CGContextSetRGBStrokeColor(ctx, 0.0, 0.0, 0.0, 1.0);
-
-    // 라인 1: (16, 16) -> (19, 29)
-    CGContextMoveToPoint(ctx, 16.0, 36.0 - 16.0);
-    CGContextAddLineToPoint(ctx, 19.0, 36.0 - 29.0);
-
-    // 라인 2: (16, 16) -> (30, 27)
-    CGContextMoveToPoint(ctx, 16.0, 36.0 - 16.0);
-    CGContextAddLineToPoint(ctx, 30.0, 36.0 - 27.0);
-
-    // 라인 3: (18, 25) -> (25, 14)
-    CGContextMoveToPoint(ctx, 18.0, 36.0 - 25.0);
-    CGContextAddLineToPoint(ctx, 25.0, 36.0 - 14.0);
-
     CGContextStrokePath(ctx);
     CGContextRestoreGState(ctx);
 
-    // 2. 키서 정품 라이너 그라디언트 스트로크 준비 (2.5pt)
+    // 내부 고휘도 그라디언트 채우기 (Fill)
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
     CGFloat components[8];
-
-    if (self.cursorState == 1) {
-        // 좌클릭/스페이스: Neon Orange (0xFFFF4500) -> Red (0xFFFF0000)
-        components[0] = 1.0;   components[1] = 0.271; components[2] = 0.0;   components[3] = 1.0;
-        components[4] = 1.0;   components[5] = 0.0;   components[6] = 0.0;   components[7] = 1.0;
-    } else if (self.cursorState == 2) {
-        // 우클릭/G키: Yellow (0xFFFFFF00) -> Gold (0xFFFFAA00)
-        components[0] = 1.0;   components[1] = 1.0;   components[2] = 0.0;   components[3] = 1.0;
-        components[4] = 1.0;   components[5] = 0.667; components[6] = 0.0;   components[7] = 1.0;
-    } else if (self.cursorState == 3) {
-        // 스크롤: Neon Cyan (0xFF00E5FF) -> Blue (0xFF0055FF)
-        components[0] = 0.0;   components[1] = 0.898; components[2] = 1.0;   components[3] = 1.0;
-        components[4] = 0.0;   components[5] = 0.333; components[6] = 1.0;   components[7] = 1.0;
-    } else if (self.cursorState == 4) {
-        // 드래그: Neon Orange (0xFFFF4500) -> Pink-Red (0xFFFF007F)
-        components[0] = 1.0;   components[1] = 0.271; components[2] = 0.0;   components[3] = 1.0;
-        components[4] = 1.0;   components[5] = 0.0;   components[6] = 0.498; components[7] = 1.0;
-    } else {
-        // 키서 정식 시그니처: Neon Green (0xFF2FFFAD) -> Dark Forest Green (0xFF004D20)
-        components[0] = 0.184; components[1] = 1.0;   components[2] = 0.678; components[3] = 1.0;
-        components[4] = 0.0;   components[5] = 0.302; components[6] = 0.125; components[7] = 1.0;
+    if (self.cursorState == 1) { // Left Click: Orange -> Red
+        components[0] = 1.0; components[1] = 0.4; components[2] = 0.0; components[3] = 1.0;
+        components[4] = 1.0; components[5] = 0.0; components[6] = 0.0; components[7] = 1.0;
+    } else if (self.cursorState == 2) { // Right Click: Gold -> Yellow
+        components[0] = 1.0; components[1] = 0.9; components[2] = 0.0; components[3] = 1.0;
+        components[4] = 1.0; components[5] = 0.6; components[6] = 0.0; components[7] = 1.0;
+    } else if (self.cursorState == 3) { // Scroll: Cyan -> Blue
+        components[0] = 0.0; components[1] = 1.0; components[2] = 1.0; components[3] = 1.0;
+        components[4] = 0.0; components[5] = 0.4; components[6] = 1.0; components[7] = 1.0;
+    } else { // Normal: Keysor Signature Green
+        components[0] = 0.2; components[1] = 1.0; components[2] = 0.6; components[3] = 1.0;
+        components[4] = 0.0; components[5] = 0.6; components[6] = 0.3; components[7] = 1.0;
     }
-
     CGGradientRef gradient = CGGradientCreateWithColorComponents(colorSpace, components, NULL, 2);
 
     CGContextSaveGState(ctx);
-    CGContextSetLineWidth(ctx, 2.5);
-    CGContextSetLineCap(ctx, kCGLineCapRound);
-    CGContextSetLineJoin(ctx, kCGLineJoinRound);
-
-    CGContextMoveToPoint(ctx, 16.0, 36.0 - 16.0);
-    CGContextAddLineToPoint(ctx, 19.0, 36.0 - 29.0);
-
-    CGContextMoveToPoint(ctx, 16.0, 36.0 - 16.0);
-    CGContextAddLineToPoint(ctx, 30.0, 36.0 - 27.0);
-
-    CGContextMoveToPoint(ctx, 18.0, 36.0 - 25.0);
-    CGContextAddLineToPoint(ctx, 25.0, 36.0 - 14.0);
-
-    CGContextReplacePathWithStrokedPath(ctx);
+    CGContextAddPath(ctx, arrowPath);
     CGContextClip(ctx);
-
-    CGPoint startPt = CGPointMake(16.0, 36.0 - 16.0);
-    CGPoint endPt   = CGPointMake(30.0, 36.0 - 27.0);
-
-    CGContextDrawLinearGradient(ctx, gradient, startPt, endPt, 0);
+    CGContextDrawLinearGradient(ctx, gradient, CGPointMake(tipX, tipY), CGPointMake(tipX + 20.0, tipY - 30.0), 0);
     CGContextRestoreGState(ctx);
 
     CGGradientRelease(gradient);
     CGColorSpaceRelease(colorSpace);
+    CGPathRelease(arrowPath);
 }
 
 @end
@@ -412,8 +410,8 @@ void keysor_macos_ui_init(void) {
         g_appDelegate = [[KeysorAppDelegate alloc] init];
         [NSApp setDelegate:g_appDelegate];
 
-        // 1. 커서 오버레이 윈도우 생성
-        NSRect frame = NSMakeRect(0, 0, 36, 36);
+        // 1. 커서 오버레이 윈도우 생성 (64x64)
+        NSRect frame = NSMakeRect(0, 0, 64, 64);
         g_overlayWindow = [[NSWindow alloc] initWithContentRect:frame
                                                       styleMask:NSWindowStyleMaskBorderless
                                                         backing:NSBackingStoreBuffered
@@ -483,8 +481,8 @@ void keysor_macos_ui_update_pos(double x, double y) {
         if (g_overlayWindow == nil) return;
         NSRect displayBounds = [[NSScreen mainScreen] frame];
         double screen_h = displayBounds.size.height;
-        // 커서 핫스팟 (16, 16) 정밀 동기화
-        NSPoint origin = NSMakePoint(x - 16.0, screen_h - y - 20.0);
+        // 커서 핫스팟 (16, 48) 정밀 동기화
+        NSPoint origin = NSMakePoint(x - 16.0, screen_h - y - 48.0);
         [g_overlayWindow setFrameOrigin:origin];
     });
 }
