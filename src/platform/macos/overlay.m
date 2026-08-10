@@ -22,29 +22,7 @@ extern void keysor_macos_on_speed_change(double delta);
     CGFloat tipX = 16.0;
     CGFloat tipY = 48.0;
 
-    // 1. 커서 위치 명확 유도용 시그니처 네온 링 (Neon Halo Ring)
-    CGContextSaveGState(ctx);
-    CGContextSetLineWidth(ctx, 3.0);
-    if (self.cursorState == 1) { // Left Click / Space: Bright Red/Orange
-        CGContextSetRGBStrokeColor(ctx, 1.0, 0.27, 0.0, 0.95);
-        CGContextSetRGBFillColor(ctx, 1.0, 0.27, 0.0, 0.30);
-    } else if (self.cursorState == 2) { // Right Click: Yellow/Gold
-        CGContextSetRGBStrokeColor(ctx, 1.0, 0.85, 0.0, 0.95);
-        CGContextSetRGBFillColor(ctx, 1.0, 0.85, 0.0, 0.30);
-    } else if (self.cursorState == 3) { // Scroll: Cyan
-        CGContextSetRGBStrokeColor(ctx, 0.0, 0.9, 1.0, 0.95);
-        CGContextSetRGBFillColor(ctx, 0.0, 0.9, 1.0, 0.30);
-    } else { // Normal Mode: Signature Neon Green
-        CGContextSetRGBStrokeColor(ctx, 0.18, 1.0, 0.68, 0.95);
-        CGContextSetRGBFillColor(ctx, 0.18, 1.0, 0.68, 0.30);
-    }
-    // Tip 주변 반경 18pt 시그니처 조명 링
-    CGRect ringRect = CGRectMake(tipX - 18.0, tipY - 18.0, 36.0, 36.0);
-    CGContextFillEllipseInRect(ctx, ringRect);
-    CGContextStrokeEllipseInRect(ctx, ringRect);
-    CGContextRestoreGState(ctx);
-
-    // 2. 키서 정품 솔리드 화살표 포인터 (Filled Solid Pointer)
+    // 1. 키서 정품 솔리드 화살표 포인터 (Filled Solid Pointer)
     CGMutablePathRef arrowPath = CGPathCreateMutable();
     CGPathMoveToPoint(arrowPath, NULL, tipX, tipY);               // (16, 48) Tip
     CGPathAddLineToPoint(arrowPath, NULL, tipX + 20.0, tipY - 20.0); // (36, 28) Right wing
