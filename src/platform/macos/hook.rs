@@ -238,76 +238,46 @@ impl KeyboardHook for MacosKeyboardHook {
         // 손쉬운 사용 권한이 없으면 시스템 설정을 열고, 권한이 부여될 때까지
         // 1초마다 자동으로 재시도하여 EventTap을 생성합니다.
         std::thread::spawn(|| unsafe {
-            // 권한 획득 대기 루프
+            let event_mask = (1u64 << K_CG_EVENT_KEY_DOWN) | (1u64 << K_CG_EVENT_KEY_UP) | (1u64 << K_CG_EVENT_FLAGS_CHANGED);
+
+            // 손쉬운 사용 권한이 없으면 최초 1회만 설정 창을 유저에게 표시
             if !AXIsProcessTrusted() {
                 eprintln!("[Keysor] Waiting for Accessibility permission...");
                 let _ = std::process::Command::new("open")
                     .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
                     .spawn();
-                loop {
-                    std::thread::sleep(std::time::Duration::from_secs(1));
-                    if AXIsProcessTrusted() {
-                        println!("[Keysor] Accessibility permission granted! Relaunching...");
-                        // 잠금 파일 삭제 → 새 프로세스가 중복 실행으로 오인하지 않도록
-                        let home = std::env::var("HOME")
-                            .unwrap_or_else(|_| "/tmp".to_string());
-                        let lock_path = std::path::Path::new(&home)
-                            .join(".keysor")
-                            .join("keysor.lock");
-                        let _ = std::fs::remove_file(&lock_path);
-
-                        // .app 번들 안에서 실행 중인 경우 open -n 으로 번들 식별자(app.keysor.keysor)를 유지하며 재시작
-                        if let Ok(exe) = std::env::current_exe() {
-                            let app_bundle = exe.parent()
-                                .and_then(|p| p.parent())
-                                .and_then(|p| p.parent())
-                                .filter(|p| p.extension().map_or(false, |ext| ext == "app"));
-
-                            if let Some(app_path) = app_bundle {
-                                let _ = std::process::Command::new("open")
-                                    .arg("-n")
-                                    .arg(app_path)
-                                    .spawn();
-                            } else {
-                                let _ = std::process::Command::new(&exe).spawn();
-                            }
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(300));
-                        std::process::exit(0);
-                    }
-                }
             }
 
-            let event_mask = (1u64 << K_CG_EVENT_KEY_DOWN) | (1u64 << K_CG_EVENT_KEY_UP) | (1u64 << K_CG_EVENT_FLAGS_CHANGED);
-
-            // EventTap 생성도 권한 부여 직후 실패할 수 있으므로 재시도
+            // 프로세스를 재시작하지 않고, 동일 프로세스 내에서 권한 획득 시 1초 내에 CGEventTap 자동 결합
             let mut port;
             loop {
-                port = CGEventTapCreate(
-                    K_CG_SESSION_EVENT_TAP,
-                    K_CG_HEAD_INSERT_EVENT_TAP,
-                    K_CG_EVENT_TAP_OPTION_DEFAULT,
-                    event_mask,
-                    event_tap_callback,
-                    std::ptr::null_mut(),
-                );
-
-                if port.is_null() {
+                if AXIsProcessTrusted() {
                     port = CGEventTapCreate(
-                        K_CG_HID_EVENT_TAP,
+                        K_CG_SESSION_EVENT_TAP,
                         K_CG_HEAD_INSERT_EVENT_TAP,
                         K_CG_EVENT_TAP_OPTION_DEFAULT,
                         event_mask,
                         event_tap_callback,
                         std::ptr::null_mut(),
                     );
+
+                    if port.is_null() {
+                        port = CGEventTapCreate(
+                            K_CG_HID_EVENT_TAP,
+                            K_CG_HEAD_INSERT_EVENT_TAP,
+                            K_CG_EVENT_TAP_OPTION_DEFAULT,
+                            event_mask,
+                            event_tap_callback,
+                            std::ptr::null_mut(),
+                        );
+                    }
+
+                    if !port.is_null() {
+                        println!("[Keysor] CGEventTap created successfully!");
+                        break;
+                    }
                 }
 
-                if !port.is_null() {
-                    break;
-                }
-
-                eprintln!("[Keysor] CGEventTap creation failed, retrying in 1s...");
                 std::thread::sleep(std::time::Duration::from_secs(1));
             }
 
