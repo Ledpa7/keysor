@@ -20,7 +20,40 @@ fn encode_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+#[cfg(target_os = "macos")]
+fn ensure_single_instance() -> bool {
+    use std::os::unix::io::AsRawFd;
+    unsafe extern "C" {
+        fn flock(fd: i32, op: i32) -> i32;
+    }
+
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let lock_dir = std::path::PathBuf::from(home).join(".keysor");
+    let _ = fs::create_dir_all(&lock_dir);
+    let lock_path = lock_dir.join("keysor.lock");
+
+    let file = match fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&lock_path) {
+        Ok(f) => f,
+        Err(_) => return true,
+    };
+
+    let fd = file.as_raw_fd();
+    // LOCK_EX (2) | LOCK_NB (4) = 6
+    let res = unsafe { flock(fd, 2 | 4) };
+    if res != 0 {
+        println!("[SingleInstance] Another Keysor process is already running. Exiting.");
+        return false;
+    }
+    Box::leak(Box::new(file));
+    true
+}
+
 fn main() {
+    #[cfg(target_os = "macos")]
+    if !ensure_single_instance() {
+        println!("[Keysor] Duplicate process detected. Terminating duplicate instance.");
+        std::process::exit(0);
+    }
 
 
     #[cfg(windows)]
