@@ -144,8 +144,8 @@ extern "C" fn event_tap_callback(
     event: *mut c_void,
     _refcon: *mut c_void,
 ) -> *mut c_void {
-    // macOS 타임아웃/입력 전환으로 탭 비활성화 시 자동 재활성화
-    if etype == 0x0FFFFFFF || etype == 0xFFFFFFFF {
+    // macOS 타임아웃/입력 전환으로 탭 비활성화 시 (14: Timeout, 15: UserInput) 즉시 자동 재활성화
+    if etype == 14 || etype == 15 || etype == 0x0FFFFFFF || etype == 0xFFFFFFFF {
         unsafe {
             if !EVENT_TAP_PORT.is_null() {
                 CGEventTapEnable(EVENT_TAP_PORT, true);
