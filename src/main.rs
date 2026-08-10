@@ -41,7 +41,13 @@ fn ensure_single_instance() -> bool {
     // LOCK_EX (2) | LOCK_NB (4) = 6
     let res = unsafe { flock(fd, 2 | 4) };
     if res != 0 {
-        println!("[SingleInstance] Another Keysor process is already running. Exiting.");
+        println!("[SingleInstance] Another Keysor process is already running. Requesting HUD popup.");
+        unsafe {
+            unsafe extern "C" {
+                fn keysor_macos_post_show_hud_notification();
+            }
+            keysor_macos_post_show_hud_notification();
+        }
         return false;
     }
     Box::leak(Box::new(file));

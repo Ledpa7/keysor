@@ -369,21 +369,32 @@ static KeysorHudView *g_hudView = nil;
 @interface KeysorAppDelegate : NSObject <NSApplicationDelegate>
 @end
 
+void keysor_macos_show_hud(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (g_hudWindow != nil) {
+            [g_hudWindow setAlphaValue:1.0];
+            [g_hudWindow makeKeyAndOrderFront:nil];
+            [g_hudWindow orderFrontRegardless];
+            [NSApp activateIgnoringOtherApps:YES];
+        }
+    });
+}
+
+void keysor_macos_post_show_hud_notification(void) {
+    [[NSDistributedNotificationCenter defaultCenter] postNotificationName:@"KeysorShowHudNotification"
+                                                                   object:nil
+                                                                 userInfo:nil
+                                                       deliverImmediately:YES];
+}
+
 @implementation KeysorAppDelegate
 
 - (void)applicationDidBecomeActive:(NSNotification *)notification {
-    if (g_hudWindow != nil) {
-        [g_hudWindow makeKeyAndOrderFront:nil];
-        [g_hudWindow orderFrontRegardless];
-    }
+    keysor_macos_show_hud();
 }
 
 - (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)flag {
-    if (g_hudWindow != nil) {
-        [g_hudWindow makeKeyAndOrderFront:nil];
-        [g_hudWindow orderFrontRegardless];
-        [NSApp activateIgnoringOtherApps:YES];
-    }
+    keysor_macos_show_hud();
     return YES;
 }
 
@@ -412,6 +423,13 @@ void keysor_macos_ui_init(void) {
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
         g_appDelegate = [[KeysorAppDelegate alloc] init];
         [NSApp setDelegate:g_appDelegate];
+
+        [[NSDistributedNotificationCenter defaultCenter] addObserverForName:@"KeysorShowHudNotification"
+                                                                      object:nil
+                                                                       queue:[NSOperationQueue mainQueue]
+                                                                  usingBlock:^(NSNotification *note) {
+            keysor_macos_show_hud();
+        }];
 
         // 1. 커서 오버레이 윈도우 생성 (36x36 Baseline)
         NSRect frame = NSMakeRect(0, 0, 36, 36);
