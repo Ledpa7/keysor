@@ -317,15 +317,8 @@ impl KeyboardHook for MacosKeyboardHook {
         *cb = None;
     }
 
-    fn modifier_sync_guard(&self, is_mouse_mode: bool, is_toggle_mode: bool, on_deactivate: fn()) {
-        if is_mouse_mode && !is_toggle_mode {
-            unsafe {
-                let physical_caps_pressed = CGEventSourceKeyState(0, 57);
-                if !physical_caps_pressed {
-                    println!("[Sync Guard] Caps Lock physical key released in macOS. Resetting mouse mode.");
-                    on_deactivate();
-                }
-            }
-        }
+    fn modifier_sync_guard(&self, _is_mouse_mode: bool, _is_toggle_mode: bool, _on_deactivate: fn()) {
+        // macOS에서는 Caps Lock 키가 ON/OFF 토글 방식으로 동작하므로 
+        // Sync Guard가 손 뗌 감지로 마우스 모드를 강제 해제하지 않음
     }
 }
