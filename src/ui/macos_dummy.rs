@@ -7,6 +7,45 @@ unsafe extern "C" {
     fn keysor_macos_ui_show(visible: bool);
     fn keysor_macos_ui_update_pos(x: f64, y: f64);
     fn keysor_macos_ui_set_click_motion(clickType: i32);
+    fn keysor_macos_ui_update_speed_display(speed: f64);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn keysor_macos_on_lang_toggle() {
+    let mut config_to_save = None;
+    if let Some(state_arc) = crate::hook::APP_STATE.get() {
+        if let Ok(mut state) = state_arc.lock() {
+            let cur = state.config.settings.lang_en.unwrap_or(false);
+            state.config.settings.lang_en = Some(!cur);
+            config_to_save = Some(state.config.clone());
+        }
+    }
+    if let Some(cfg) = config_to_save {
+        crate::config::save_config(&cfg);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn keysor_macos_on_speed_change(delta: f64) {
+    let mut config_to_save = None;
+    let mut new_spd = 1.5;
+    if let Some(state_arc) = crate::hook::APP_STATE.get() {
+        if let Ok(mut state) = state_arc.lock() {
+            let mut speed = state.config.settings.base_speed + delta;
+            if speed < 0.1 { speed = 0.1; }
+            if speed > 10.0 { speed = 10.0; }
+            speed = (speed * 10.0).round() / 10.0;
+            state.config.settings.base_speed = speed;
+            new_spd = speed;
+            config_to_save = Some(state.config.clone());
+        }
+    }
+    if let Some(cfg) = config_to_save {
+        crate::config::save_config(&cfg);
+    }
+    unsafe {
+        keysor_macos_ui_update_speed_display(new_spd);
+    }
 }
 
 static IS_VISIBLE: AtomicBool = AtomicBool::new(false);
@@ -31,7 +70,7 @@ impl KeysorUi for MacosDummyUi {
             crate::indicator::update_indicator_position();
         });
 
-        println!("[UI] macOS Native ObjC Custom Cursor Overlay Window initialized successfully.");
+        println!("[UI] macOS Native ObjC Custom Cursor & HUD Popup Window initialized successfully.");
         Ok(())
     }
 
