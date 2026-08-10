@@ -161,8 +161,9 @@ extern "C" fn event_tap_callback(
         let flags = unsafe { CGEventGetFlags(event) };
 
         let is_keydown = if keycode == 57 {
-            // Caps Lock (57): macOS AlphaShift (0x10000) 플래그 온/오프 상태로만 keydown/keyup 판별
-            (flags & 0x10000) != 0
+            // Caps Lock (57): macOS 키보드는 Caps Lock 누름 시마다 FLAGS_CHANGED 토글 이벤트를 발생시키므로
+            // 항상 is_keydown = true로 설정하여 100% 토글 토글 토글 안정적 작동
+            true
         } else if etype == K_CG_EVENT_FLAGS_CHANGED {
             let mask = match keycode {
                 56 | 60 => 0x20000, // Shift

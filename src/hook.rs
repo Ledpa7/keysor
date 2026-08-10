@@ -522,6 +522,9 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
 
     if let Some(state_arc) = APP_STATE.get() {
         let mut state = state_arc.lock().unwrap();
+        #[cfg(target_os = "macos")]
+        let is_toggle_mode = true;
+        #[cfg(not(target_os = "macos"))]
         let is_toggle_mode = state.config.settings.modifier_mode.eq_ignore_ascii_case("Toggle");
 
         if event.is_keydown {
