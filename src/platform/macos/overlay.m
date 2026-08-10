@@ -383,7 +383,6 @@ static KeysorHudView *g_hudView = nil;
 @end
 
 void keysor_macos_show_hud(void) {
-    NSLog(@"[Keysor ObjC] keysor_macos_show_hud called!");
     dispatch_async(dispatch_get_main_queue(), ^{
         if (g_hudWindow != nil) {
             NSRect mainScreenFrame = [[NSScreen mainScreen] frame];
@@ -395,16 +394,11 @@ void keysor_macos_show_hud(void) {
             [g_hudWindow makeKeyAndOrderFront:nil];
             [g_hudWindow orderFrontRegardless];
             [g_hudWindow display];
-            [NSApp activateIgnoringOtherApps:YES];
-            NSLog(@"[Keysor ObjC] g_hudWindow orderFrontRegardless completed.");
-        } else {
-            NSLog(@"[Keysor ObjC] g_hudWindow is NULL!");
         }
     });
 }
 
 void keysor_macos_post_show_hud_notification(void) {
-    NSLog(@"[Keysor ObjC] Posting KeysorShowHudNotification via NSDistributedNotificationCenter...");
     [[NSDistributedNotificationCenter defaultCenter] postNotificationName:@"KeysorShowHudNotification"
                                                                    object:nil
                                                                  userInfo:nil
@@ -412,11 +406,6 @@ void keysor_macos_post_show_hud_notification(void) {
 }
 
 @implementation KeysorAppDelegate
-
-- (void)applicationDidBecomeActive:(NSNotification *)notification {
-    NSLog(@"[Keysor ObjC] applicationDidBecomeActive called!");
-    keysor_macos_show_hud();
-}
 
 - (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)flag {
     NSLog(@"[Keysor ObjC] applicationShouldHandleReopen called! hasVisibleWindows=%d", flag);
@@ -460,7 +449,6 @@ void keysor_macos_ui_init(void) {
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
         g_appDelegate = [[KeysorAppDelegate alloc] init];
         [NSApp setDelegate:g_appDelegate];
-        [NSApp finishLaunching];
 
         [[NSDistributedNotificationCenter defaultCenter] addObserverForName:@"KeysorShowHudNotification"
                                                                       object:nil
