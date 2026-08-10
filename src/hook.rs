@@ -558,7 +558,6 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
                 indicator_action = IndicatorAction::Hide;
             }
 
-            #[cfg(windows)]
             if elapsed < Duration::from_millis(250) && !used_modifier {
                 should_inject = true;
             }
