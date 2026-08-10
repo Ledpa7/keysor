@@ -522,9 +522,6 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
 
     if let Some(state_arc) = APP_STATE.get() {
         let mut state = state_arc.lock().unwrap();
-        #[cfg(target_os = "macos")]
-        let is_toggle_mode = true;
-        #[cfg(not(target_os = "macos"))]
         let is_toggle_mode = state.config.settings.modifier_mode.eq_ignore_ascii_case("Toggle");
 
         if event.is_keydown {
@@ -1005,7 +1002,25 @@ pub fn cleanup_hook() {
     crate::ui::win_gdi::restore_system_cursor();
 }
 
-/// 포커스 전환 및 강제 상황 시 CapsLock 물리 눌림 상태를 확인하는 동기화 가드
+fn on_deactivate_global() {
+    if let Some(state_arc) = APP_STATE.get() {
+        if let Ok(mut state) = state_arc.lock() {
+            state.deactivate_mouse_mode();
+        }
+        crate::indicator::hide_indicator();
+    }
+}
+
 pub fn modifier_sync_guard() {
-    // 윈도우 시작 메뉴, 시계/달력, 팝업창 포커스 전환 시 마우스 모드가 꺼져 커서가 안 보이는 현상을 100% 방지함
+    if let Some(state_arc) = APP_STATE.get() {
+        let (is_mouse_mode, is_toggle_mode) = {
+            let state = state_arc.lock().unwrap();
+            (state.is_mouse_mode, state.config.settings.modifier_mode.eq_ignore_ascii_case("Toggle"))
+        };
+        if is_mouse_mode && !is_toggle_mode {
+            if let Some(hook) = KEYBOARD_HOOK.get() {
+                hook.modifier_sync_guard(is_mouse_mode, is_toggle_mode, on_deactivate_global);
+            }
+        }
+    }
 }
