@@ -137,6 +137,8 @@ fn macos_keycode_to_vk(keycode: u32) -> u32 {
     }
 }
 
+static mut CAPS_LOCK_DOWN_STATE: bool = false;
+
 // C 스타일 EventTap 콜백 함수
 extern "C" fn event_tap_callback(
     proxy: *mut c_void,
@@ -161,8 +163,16 @@ extern "C" fn event_tap_callback(
         let flags = unsafe { CGEventGetFlags(event) };
 
         let is_keydown = if keycode == 57 {
-            // Caps Lock (57): 누를 때마다 is_keydown = true로 전달하여 ON/OFF 토글이 100% 안정적으로 동작
-            true
+            if etype == K_CG_EVENT_KEY_DOWN {
+                true
+            } else if etype == K_CG_EVENT_KEY_UP {
+                false
+            } else {
+                unsafe {
+                    CAPS_LOCK_DOWN_STATE = !CAPS_LOCK_DOWN_STATE;
+                    CAPS_LOCK_DOWN_STATE
+                }
+            }
         } else if etype == K_CG_EVENT_FLAGS_CHANGED {
             let mask = match keycode {
                 56 | 60 => 0x20000,  // Shift

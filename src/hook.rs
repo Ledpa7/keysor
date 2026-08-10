@@ -522,70 +522,48 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
 
     if let Some(state_arc) = APP_STATE.get() {
         let mut state = state_arc.lock().unwrap();
-        #[cfg(target_os = "macos")]
-        {
-            if event.is_keydown {
-                let should_process = match state.caps_lock_press_time {
-                    None => true,
-                    Some(t) => t.elapsed() > Duration::from_millis(150),
-                };
+        let is_toggle_mode = state.config.settings.modifier_mode.eq_ignore_ascii_case("Toggle");
 
-                if should_process {
-                    state.caps_lock_press_time = Some(Instant::now());
+        if event.is_keydown {
+            let should_process = match state.caps_lock_press_time {
+                None => true,
+                Some(t) => t.elapsed() > Duration::from_millis(150),
+            };
+
+            if should_process {
+                state.caps_lock_press_time = Some(Instant::now());
+                state.caps_lock_used_as_modifier = false;
+
+                if is_toggle_mode {
                     if state.is_mouse_mode {
-                        println!("[Keysor] Caps Lock -> Disabling mouse mode (OFF)");
+                        println!("[Keysor] Caps Lock -> Mouse mode OFF (Toggle)");
                         state.deactivate_mouse_mode();
                         indicator_action = IndicatorAction::Hide;
                     } else {
-                        println!("[Keysor] Caps Lock -> Enabling mouse mode (ON)");
+                        println!("[Keysor] Caps Lock -> Mouse mode ON (Toggle)");
                         state.is_mouse_mode = true;
                         indicator_action = IndicatorAction::Show;
                     }
+                } else {
+                    println!("[Keysor] Caps Lock -> Mouse mode ON (Hold)");
+                    state.is_mouse_mode = true;
+                    indicator_action = IndicatorAction::Show;
                 }
             }
-        }
+        } else if event.is_keyup {
+            let elapsed = state.caps_lock_press_time.map_or(Duration::ZERO, |t| t.elapsed());
+            let used_modifier = state.caps_lock_used_as_modifier;
 
-        #[cfg(not(target_os = "macos"))]
-        {
-            let is_toggle_mode = state.config.settings.modifier_mode.eq_ignore_ascii_case("Toggle");
+            state.caps_lock_press_time = None;
 
-            if event.is_keydown {
-                let should_process = match state.caps_lock_press_time {
-                    None => true,
-                    Some(t) => t.elapsed() > Duration::from_millis(150),
-                };
+            if !is_toggle_mode {
+                println!("[Keysor] Caps Lock Released -> Mouse mode OFF (Hold)");
+                state.deactivate_mouse_mode();
+                indicator_action = IndicatorAction::Hide;
+            }
 
-                if should_process {
-                    state.caps_lock_press_time = Some(Instant::now());
-                    state.caps_lock_used_as_modifier = false;
-
-                    if is_toggle_mode {
-                        if state.is_mouse_mode {
-                            state.deactivate_mouse_mode();
-                            indicator_action = IndicatorAction::Hide;
-                        } else {
-                            state.is_mouse_mode = true;
-                            indicator_action = IndicatorAction::Show;
-                        }
-                    } else {
-                        state.is_mouse_mode = true;
-                        indicator_action = IndicatorAction::Show;
-                    }
-                }
-            } else if event.is_keyup {
-                let elapsed = state.caps_lock_press_time.map_or(Duration::ZERO, |t| t.elapsed());
-                let used_modifier = state.caps_lock_used_as_modifier;
-
-                state.caps_lock_press_time = None;
-
-                if !is_toggle_mode {
-                    state.deactivate_mouse_mode();
-                    indicator_action = IndicatorAction::Hide;
-                }
-
-                if elapsed < Duration::from_millis(250) && !used_modifier {
-                    should_inject = true;
-                }
+            if elapsed < Duration::from_millis(250) && !used_modifier {
+                should_inject = true;
             }
         }
     }
