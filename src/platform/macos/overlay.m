@@ -360,27 +360,50 @@ static void drawHudButton(NSRect rect, NSString *label, NSColor *bgColor, NSColo
 
 @end
 
+@interface KeysorHudWindow : NSWindow
+@end
+
+@implementation KeysorHudWindow
+- (BOOL)canBecomeKeyWindow {
+    return YES;
+}
+- (BOOL)canBecomeMainWindow {
+    return YES;
+}
+@end
+
 static NSWindow *g_overlayWindow = nil;
 static KeysorCursorView *g_cursorView = nil;
 
-static NSWindow *g_hudWindow = nil;
+static KeysorHudWindow *g_hudWindow = nil;
 static KeysorHudView *g_hudView = nil;
 
 @interface KeysorAppDelegate : NSObject <NSApplicationDelegate>
 @end
 
 void keysor_macos_show_hud(void) {
+    NSLog(@"[Keysor ObjC] keysor_macos_show_hud called!");
     dispatch_async(dispatch_get_main_queue(), ^{
         if (g_hudWindow != nil) {
+            NSRect mainScreenFrame = [[NSScreen mainScreen] frame];
+            CGFloat hudX = (mainScreenFrame.size.width - 808.0) / 2.0;
+            CGFloat hudY = (mainScreenFrame.size.height - 452.0) / 2.0;
+            [g_hudWindow setFrameOrigin:NSMakePoint(hudX, hudY)];
             [g_hudWindow setAlphaValue:1.0];
+            [g_hudWindow setLevel:NSModalPanelWindowLevel];
             [g_hudWindow makeKeyAndOrderFront:nil];
             [g_hudWindow orderFrontRegardless];
+            [g_hudWindow display];
             [NSApp activateIgnoringOtherApps:YES];
+            NSLog(@"[Keysor ObjC] g_hudWindow orderFrontRegardless completed.");
+        } else {
+            NSLog(@"[Keysor ObjC] g_hudWindow is NULL!");
         }
     });
 }
 
 void keysor_macos_post_show_hud_notification(void) {
+    NSLog(@"[Keysor ObjC] Posting KeysorShowHudNotification via NSDistributedNotificationCenter...");
     [[NSDistributedNotificationCenter defaultCenter] postNotificationName:@"KeysorShowHudNotification"
                                                                    object:nil
                                                                  userInfo:nil
@@ -390,10 +413,12 @@ void keysor_macos_post_show_hud_notification(void) {
 @implementation KeysorAppDelegate
 
 - (void)applicationDidBecomeActive:(NSNotification *)notification {
+    NSLog(@"[Keysor ObjC] applicationDidBecomeActive called!");
     keysor_macos_show_hud();
 }
 
 - (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)flag {
+    NSLog(@"[Keysor ObjC] applicationShouldHandleReopen called! hasVisibleWindows=%d", flag);
     keysor_macos_show_hud();
     return YES;
 }
@@ -457,10 +482,10 @@ void keysor_macos_ui_init(void) {
         CGFloat hudY = (mainScreenFrame.size.height - 452.0) / 2.0;
         NSRect hudFrame = NSMakeRect(hudX, hudY, 808.0, 452.0);
 
-        g_hudWindow = [[NSWindow alloc] initWithContentRect:hudFrame
-                                                  styleMask:NSWindowStyleMaskBorderless
-                                                    backing:NSBackingStoreBuffered
-                                                      defer:NO];
+        g_hudWindow = [[KeysorHudWindow alloc] initWithContentRect:hudFrame
+                                                         styleMask:NSWindowStyleMaskBorderless
+                                                           backing:NSBackingStoreBuffered
+                                                             defer:NO];
         [g_hudWindow setBackgroundColor:[NSColor clearColor]];
         [g_hudWindow setOpaque:NO];
         [g_hudWindow setHasShadow:YES];
