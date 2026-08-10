@@ -308,9 +308,9 @@ static void drawHudButton(NSRect rect, NSString *label, NSColor *bgColor, NSColo
         return;
     }
 
-    // 최소화 버튼 클릭
+    // 최소화 버튼 클릭 (borderless 창은 miniaturize 불가 → orderOut으로 창 숨김)
     if (NSPointInRect(p, NSMakeRect(742, h - 10 - 20, 24, 20))) {
-        [[self window] miniaturize:nil];
+        [[self window] orderOut:nil];
         return;
     }
 
