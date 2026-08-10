@@ -314,9 +314,10 @@ static void drawHudButton(NSRect rect, NSString *label, NSColor *bgColor, NSColo
         return;
     }
 
-    // 닫기 버튼 클릭
+    // 닫기 버튼 클릭 (HUD X 버튼 클릭 시 프로세스 완전 종료)
     if (NSPointInRect(p, NSMakeRect(772, h - 10 - 20, 24, 20))) {
-        [[self window] orderOut:nil];
+        NSLog(@"[Keysor ObjC] HUD Close X button clicked, exiting Keysor...");
+        exit(0);
         return;
     }
 
@@ -421,6 +422,17 @@ void keysor_macos_post_show_hud_notification(void) {
     NSLog(@"[Keysor ObjC] applicationShouldHandleReopen called! hasVisibleWindows=%d", flag);
     keysor_macos_show_hud();
     return YES;
+}
+
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
+    NSLog(@"[Keysor ObjC] applicationShouldTerminate called, exiting process...");
+    exit(0);
+    return NSTerminateNow;
+}
+
+- (void)applicationWillTerminate:(NSNotification *)notification {
+    NSLog(@"[Keysor ObjC] applicationWillTerminate called, exiting process...");
+    exit(0);
 }
 
 @end
