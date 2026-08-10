@@ -366,11 +366,31 @@ static KeysorCursorView *g_cursorView = nil;
 static NSWindow *g_hudWindow = nil;
 static KeysorHudView *g_hudView = nil;
 
+@interface KeysorAppDelegate : NSObject <NSApplicationDelegate>
+@end
+
+@implementation KeysorAppDelegate
+
+- (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)flag {
+    if (g_hudWindow != nil) {
+        [g_hudWindow makeKeyAndOrderFront:nil];
+        [g_hudWindow orderFrontRegardless];
+        [NSApp activateIgnoringOtherApps:YES];
+    }
+    return YES;
+}
+
+@end
+
+static KeysorAppDelegate *g_appDelegate = nil;
+
 void keysor_macos_ui_init(void) {
     if (g_overlayWindow != nil) return;
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+        g_appDelegate = [[KeysorAppDelegate alloc] init];
+        [NSApp setDelegate:g_appDelegate];
 
         // 1. 커서 오버레이 윈도우 생성
         NSRect frame = NSMakeRect(0, 0, 36, 36);
