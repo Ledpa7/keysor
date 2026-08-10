@@ -40,7 +40,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             settings: Settings {
-                modifier_mode: "Hold".to_string(),
+                modifier_mode: "Toggle".to_string(),
                 modifier_key: "CapsLock".to_string(),
                 base_speed: 1.5,
                 max_speed: 30.0,
