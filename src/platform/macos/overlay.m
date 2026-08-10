@@ -18,57 +18,81 @@ extern void keysor_macos_on_speed_change(double delta);
 
     CGContextClearRect(ctx, dirtyRect);
 
-    // Tip point: (16, 48)
-    CGFloat tipX = 16.0;
-    CGFloat tipY = 48.0;
-
-    // 1. 키서 정품 솔리드 화살표 포인터 (Filled Solid Pointer)
-    CGMutablePathRef arrowPath = CGPathCreateMutable();
-    CGPathMoveToPoint(arrowPath, NULL, tipX, tipY);               // (16, 48) Tip
-    CGPathAddLineToPoint(arrowPath, NULL, tipX + 20.0, tipY - 20.0); // (36, 28) Right wing
-    CGPathAddLineToPoint(arrowPath, NULL, tipX + 10.0, tipY - 15.0); // (26, 33) Notch
-    CGPathAddLineToPoint(arrowPath, NULL, tipX + 15.0, tipY - 30.0); // (31, 18) Tail right
-    CGPathAddLineToPoint(arrowPath, NULL, tipX + 8.0,  tipY - 32.0); // (24, 16) Tail stem
-    CGPathAddLineToPoint(arrowPath, NULL, tipX + 4.0,  tipY - 18.0); // (20, 30) Notch left
-    CGPathAddLineToPoint(arrowPath, NULL, tipX,        tipY - 24.0); // (16, 24) Left wing
-    CGPathCloseSubpath(arrowPath);
-
-    // 외곽 선명한 검정 고대비 테두리 (Stroke)
+    // 1. 검정 고대비 외곽 테두리 (4.0pt, 라운드 캡/조인)
     CGContextSaveGState(ctx);
-    CGContextAddPath(ctx, arrowPath);
-    CGContextSetLineWidth(ctx, 3.5);
+    CGContextSetLineWidth(ctx, 4.0);
+    CGContextSetLineCap(ctx, kCGLineCapRound);
     CGContextSetLineJoin(ctx, kCGLineJoinRound);
     CGContextSetRGBStrokeColor(ctx, 0.0, 0.0, 0.0, 1.0);
+
+    // 라인 1: (16, 16) -> (19, 29)
+    CGContextMoveToPoint(ctx, 16.0, 36.0 - 16.0);
+    CGContextAddLineToPoint(ctx, 19.0, 36.0 - 29.0);
+
+    // 라인 2: (16, 16) -> (30, 27)
+    CGContextMoveToPoint(ctx, 16.0, 36.0 - 16.0);
+    CGContextAddLineToPoint(ctx, 30.0, 36.0 - 27.0);
+
+    // 라인 3: (18, 25) -> (25, 14)
+    CGContextMoveToPoint(ctx, 18.0, 36.0 - 25.0);
+    CGContextAddLineToPoint(ctx, 25.0, 36.0 - 14.0);
+
     CGContextStrokePath(ctx);
     CGContextRestoreGState(ctx);
 
-    // 내부 고휘도 그라디언트 채우기 (Fill)
+    // 2. 키서 정품 라이너 그라디언트 스트로크 준비 (2.5pt)
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
     CGFloat components[8];
-    if (self.cursorState == 1) { // Left Click: Orange -> Red
-        components[0] = 1.0; components[1] = 0.4; components[2] = 0.0; components[3] = 1.0;
-        components[4] = 1.0; components[5] = 0.0; components[6] = 0.0; components[7] = 1.0;
-    } else if (self.cursorState == 2) { // Right Click: Gold -> Yellow
-        components[0] = 1.0; components[1] = 0.9; components[2] = 0.0; components[3] = 1.0;
-        components[4] = 1.0; components[5] = 0.6; components[6] = 0.0; components[7] = 1.0;
-    } else if (self.cursorState == 3) { // Scroll: Cyan -> Blue
-        components[0] = 0.0; components[1] = 1.0; components[2] = 1.0; components[3] = 1.0;
-        components[4] = 0.0; components[5] = 0.4; components[6] = 1.0; components[7] = 1.0;
-    } else { // Normal: Keysor Signature Green
-        components[0] = 0.2; components[1] = 1.0; components[2] = 0.6; components[3] = 1.0;
-        components[4] = 0.0; components[5] = 0.6; components[6] = 0.3; components[7] = 1.0;
+
+    if (self.cursorState == 1) {
+        // 좌클릭/스페이스: Neon Orange (0xFFFF4500) -> Red (0xFFFF0000)
+        components[0] = 1.0;   components[1] = 0.271; components[2] = 0.0;   components[3] = 1.0;
+        components[4] = 1.0;   components[5] = 0.0;   components[6] = 0.0;   components[7] = 1.0;
+    } else if (self.cursorState == 2) {
+        // 우클릭/G키: Yellow (0xFFFFFF00) -> Gold (0xFFFFAA00)
+        components[0] = 1.0;   components[1] = 1.0;   components[2] = 0.0;   components[3] = 1.0;
+        components[4] = 1.0;   components[5] = 0.667; components[6] = 0.0;   components[7] = 1.0;
+    } else if (self.cursorState == 3) {
+        // 스크롤: Neon Cyan (0xFF00E5FF) -> Blue (0xFF0055FF)
+        components[0] = 0.0;   components[1] = 0.898; components[2] = 1.0;   components[3] = 1.0;
+        components[4] = 0.0;   components[5] = 0.333; components[6] = 1.0;   components[7] = 1.0;
+    } else if (self.cursorState == 4) {
+        // 드래그: Neon Orange (0xFFFF4500) -> Pink-Red (0xFFFF007F)
+        components[0] = 1.0;   components[1] = 0.271; components[2] = 0.0;   components[3] = 1.0;
+        components[4] = 1.0;   components[5] = 0.0;   components[6] = 0.498; components[7] = 1.0;
+    } else {
+        // 키서 정식 시그니처: Neon Green (0xFF2FFFAD) -> Dark Forest Green (0xFF004D20)
+        components[0] = 0.184; components[1] = 1.0;   components[2] = 0.678; components[3] = 1.0;
+        components[4] = 0.0;   components[5] = 0.302; components[6] = 0.125; components[7] = 1.0;
     }
+
     CGGradientRef gradient = CGGradientCreateWithColorComponents(colorSpace, components, NULL, 2);
 
     CGContextSaveGState(ctx);
-    CGContextAddPath(ctx, arrowPath);
+    CGContextSetLineWidth(ctx, 2.5);
+    CGContextSetLineCap(ctx, kCGLineCapRound);
+    CGContextSetLineJoin(ctx, kCGLineJoinRound);
+
+    CGContextMoveToPoint(ctx, 16.0, 36.0 - 16.0);
+    CGContextAddLineToPoint(ctx, 19.0, 36.0 - 29.0);
+
+    CGContextMoveToPoint(ctx, 16.0, 36.0 - 16.0);
+    CGContextAddLineToPoint(ctx, 30.0, 36.0 - 27.0);
+
+    CGContextMoveToPoint(ctx, 18.0, 36.0 - 25.0);
+    CGContextAddLineToPoint(ctx, 25.0, 36.0 - 14.0);
+
+    CGContextReplacePathWithStrokedPath(ctx);
     CGContextClip(ctx);
-    CGContextDrawLinearGradient(ctx, gradient, CGPointMake(tipX, tipY), CGPointMake(tipX + 20.0, tipY - 30.0), 0);
+
+    CGPoint startPt = CGPointMake(16.0, 36.0 - 16.0);
+    CGPoint endPt   = CGPointMake(30.0, 36.0 - 27.0);
+
+    CGContextDrawLinearGradient(ctx, gradient, startPt, endPt, 0);
     CGContextRestoreGState(ctx);
 
     CGGradientRelease(gradient);
     CGColorSpaceRelease(colorSpace);
-    CGPathRelease(arrowPath);
 }
 
 @end
@@ -384,12 +408,12 @@ void keysor_macos_ui_init(void) {
     if (g_overlayWindow != nil) return;
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
         g_appDelegate = [[KeysorAppDelegate alloc] init];
         [NSApp setDelegate:g_appDelegate];
 
-        // 1. 커서 오버레이 윈도우 생성 (64x64)
-        NSRect frame = NSMakeRect(0, 0, 64, 64);
+        // 1. 커서 오버레이 윈도우 생성 (36x36 Baseline)
+        NSRect frame = NSMakeRect(0, 0, 36, 36);
         g_overlayWindow = [[NSWindow alloc] initWithContentRect:frame
                                                       styleMask:NSWindowStyleMaskBorderless
                                                         backing:NSBackingStoreBuffered
@@ -398,10 +422,10 @@ void keysor_macos_ui_init(void) {
         [g_overlayWindow setBackgroundColor:[NSColor clearColor]];
         [g_overlayWindow setOpaque:NO];
         [g_overlayWindow setHasShadow:NO];
-        [g_overlayWindow setLevel:NSScreenSaverWindowLevel]; // 1000 (Topmost Overlay Level)
+        [g_overlayWindow setLevel:NSStatusWindowLevel]; // 25
         [g_overlayWindow setHidesOnDeactivate:NO];
         [g_overlayWindow setCanHide:NO];
-        [g_overlayWindow setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle];
+        [g_overlayWindow setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary];
         [g_overlayWindow setIgnoresMouseEvents:YES];
 
         g_cursorView = [[KeysorCursorView alloc] initWithFrame:frame];
@@ -439,8 +463,7 @@ void keysor_macos_ui_show(bool visible) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (g_overlayWindow == nil) return;
         if (visible) {
-            [g_overlayWindow setAlphaValue:1.0];
-            [g_overlayWindow setLevel:NSScreenSaverWindowLevel];
+            [g_overlayWindow setAlphaValue:0.95];
             [g_overlayWindow orderFrontRegardless];
             [g_overlayWindow display];
 
@@ -459,8 +482,8 @@ void keysor_macos_ui_update_pos(double x, double y) {
         if (g_overlayWindow == nil) return;
         NSRect displayBounds = [[NSScreen mainScreen] frame];
         double screen_h = displayBounds.size.height;
-        // 커서 핫스팟 (16, 48) 정밀 동기화
-        NSPoint origin = NSMakePoint(x - 16.0, screen_h - y - 48.0);
+        // 커서 핫스팟 (16, 16) 정밀 동기화
+        NSPoint origin = NSMakePoint(x - 16.0, screen_h - y - 20.0);
         [g_overlayWindow setFrameOrigin:origin];
     });
 }
