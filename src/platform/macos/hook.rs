@@ -248,23 +248,27 @@ impl KeyboardHook for MacosKeyboardHook {
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(1));
                     if AXIsProcessTrusted() {
-                        println!("[Keysor] Accessibility permission granted! Relaunching Keysor...");
-                        // 동일 프로세스에서 EventTap을 생성하면 macOS 내부 캐시로 인해
-                        // 실패할 수 있으므로, 새 프로세스를 띄우고 현재 프로세스를 종료한다.
+                        println!("[Keysor] Accessibility permission granted! Relaunching...");
+                        // 잠금 파일을 먼저 삭제해야 새 프로세스가 중복 실행으로
+                        // 잘못 판단하지 않고 정상 시작할 수 있다.
+                        let home = std::env::var("HOME")
+                            .unwrap_or_else(|_| "/tmp".to_string());
+                        let lock_path = std::path::Path::new(&home)
+                            .join(".keysor")
+                            .join("keysor.lock");
+                        let _ = std::fs::remove_file(&lock_path);
+
                         if let Ok(exe) = std::env::current_exe() {
-                            // exe: .../Keysor.app/Contents/MacOS/keysor
-                            // 3단계 상위 = Keysor.app 번들 루트
-                            if let Some(app_bundle) = exe.parent()
+                            if let Some(bundle) = exe.parent()
                                 .and_then(|p| p.parent())
                                 .and_then(|p| p.parent())
                             {
                                 let _ = std::process::Command::new("open")
-                                    .arg(app_bundle)
+                                    .arg(bundle)
                                     .spawn();
                             }
                         }
-                        // 잠금 파일이 해제될 시간을 준 후 종료
-                        std::thread::sleep(std::time::Duration::from_millis(800));
+                        std::thread::sleep(std::time::Duration::from_millis(300));
                         std::process::exit(0);
                     }
                 }
