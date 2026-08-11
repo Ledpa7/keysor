@@ -251,12 +251,7 @@ impl KeyboardHook for MacosKeyboardHook {
         std::thread::spawn(|| unsafe {
             let event_mask = (1u64 << K_CG_EVENT_KEY_DOWN) | (1u64 << K_CG_EVENT_KEY_UP) | (1u64 << K_CG_EVENT_FLAGS_CHANGED);
 
-            // 손쉬운 사용 권한 확인 (시스템 설정 창을 자동으로 팝업하여 사용자 입력을 방해하지 않음)
-            if !AXIsProcessTrusted() {
-                eprintln!("[Keysor] Waiting for Accessibility permission...");
-            }
-
-            // 프로세스를 재시작하지 않고, 동일 프로세스 내에서 권한 획득 시 1초 내에 CGEventTap 자동 결합
+            let mut prompt_opened = false;
             let mut port;
             loop {
                 if AXIsProcessTrusted() {
@@ -283,6 +278,15 @@ impl KeyboardHook for MacosKeyboardHook {
                     if !port.is_null() {
                         println!("[Keysor] CGEventTap created successfully!");
                         break;
+                    }
+                } else {
+                    if !prompt_opened {
+                        prompt_opened = true;
+                        eprintln!("[Keysor] Accessibility permission OFF. Opening System Settings...");
+                        std::process::Command::new("open")
+                            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+                            .spawn()
+                            .ok();
                     }
                 }
 

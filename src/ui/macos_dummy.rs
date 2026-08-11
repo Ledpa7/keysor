@@ -109,14 +109,6 @@ impl KeysorUi for MacosDummyUi {
         unsafe {
             keysor_macos_ui_set_click_motion(state_val);
         }
-
-        // 120ms 후 기본 네온 그린 상태로 복구 스레드
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(120));
-            unsafe {
-                keysor_macos_ui_set_click_motion(0);
-            }
-        });
     }
 
     fn check_magnetic_snapping(&self) {}

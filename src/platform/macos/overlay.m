@@ -167,28 +167,43 @@ static void drawHudButton(NSRect rect, NSString *label, NSColor *bgColor, NSColo
 - (void)drawRect:(NSRect)dirtyRect {
     [super drawRect:dirtyRect];
 
-    // HUD 메인 배경 패널 (Dark Glassmorphic UI)
+    // HUD 메인 배경 패널 (Dark Glassmorphic UI with Windows 3D Bevel)
     NSRect bounds = [self bounds];
     NSBezierPath *bgPath = [NSBezierPath bezierPathWithRoundedRect:bounds xRadius:16.0 yRadius:16.0];
     [[NSColor colorWithCalibratedRed:0.07 green:0.07 blue:0.06 alpha:0.95] setFill];
     [bgPath fill];
-    [[NSColor colorWithCalibratedRed:0.68 green:1.0 blue:0.18 alpha:0.9] setStroke]; // Neon Lime Green
+
+    // 1. 우하단 그림자 테두리 (Dark Forest Green)
+    NSRect shadowBounds = NSMakeRect(bounds.origin.x + 1, bounds.origin.y - 1, bounds.size.width, bounds.size.height);
+    NSBezierPath *shadowPath = [NSBezierPath bezierPathWithRoundedRect:shadowBounds xRadius:16.0 yRadius:16.0];
+    [[NSColor colorWithCalibratedRed:0.0 green:0.302 blue:0.125 alpha:0.8] setStroke];
+    [shadowPath setLineWidth:2.0];
+    [shadowPath stroke];
+
+    // 2. 좌상단 메인 테두리 (Keysor Signature Neon Green #2FFFAD)
+    [[NSColor colorWithCalibratedRed:0.184 green:1.0 blue:0.678 alpha:0.9] setStroke];
     [bgPath setLineWidth:2.0];
     [bgPath stroke];
 
     // Y축 좌표계: AppKit 기본 (하단 0) -> 설계 좌표 (상단 0) 변환 (452 - y)
     CGFloat h = bounds.size.height;
 
-    // 1. 타이틀 헤더
+    // 1. 타이틀 헤더 (Dark Green 그림자 + Keysor Neon Green 메인 텍스트)
     NSString *titleStr = self.langIsEnglish ? @"Keysor, Keyboard & Cursor as One!" : @"Keysor, 키보드와 커서를 하나로!";
     NSFont *titleFont = [NSFont boldSystemFontOfSize:18.0];
-    NSDictionary *titleAttrs = @{ NSFontAttributeName: titleFont, NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.68 green:1.0 blue:0.18 alpha:1.0] };
+
+    // 타이틀 그림자
+    NSDictionary *titleShadowAttrs = @{ NSFontAttributeName: titleFont, NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.0 green:0.302 blue:0.125 alpha:1.0] };
+    [titleStr drawAtPoint:NSMakePoint(31, h - 30 - 23) withAttributes:titleShadowAttrs];
+
+    // 타이틀 메인
+    NSDictionary *titleAttrs = @{ NSFontAttributeName: titleFont, NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.184 green:1.0 blue:0.678 alpha:1.0] };
     [titleStr drawAtPoint:NSMakePoint(30, h - 30 - 24) withAttributes:titleAttrs];
 
     // Top Right 컨트롤 버튼들
     drawHudButton(NSMakeRect(430, h - 30 - 24, 110, 24), self.langIsEnglish ? @"Buy Pro" : @"프로 결제하기", [NSColor colorWithCalibratedRed:0.13 green:0.14 blue:0.14 alpha:1.0], [NSColor colorWithCalibratedRed:0.24 green:0.25 blue:0.25 alpha:1.0], [NSColor colorWithCalibratedRed:0.53 green:0.53 blue:0.53 alpha:1.0]);
     drawHudButton(NSMakeRect(546, h - 30 - 24, 110, 24), self.langIsEnglish ? @"License" : @"라이선스 등록", [NSColor colorWithCalibratedRed:0.13 green:0.14 blue:0.14 alpha:1.0], [NSColor colorWithCalibratedRed:0.24 green:0.25 blue:0.25 alpha:1.0], [NSColor colorWithCalibratedRed:0.53 green:0.53 blue:0.53 alpha:1.0]);
-    drawHudButton(NSMakeRect(662, h - 30 - 24, 50, 24), self.langIsEnglish ? @"KO" : @"EN", [NSColor colorWithCalibratedRed:0.13 green:0.14 blue:0.14 alpha:1.0], [NSColor colorWithCalibratedRed:0.68 green:1.0 blue:0.18 alpha:1.0], [NSColor colorWithCalibratedRed:0.68 green:1.0 blue:0.18 alpha:1.0]);
+    drawHudButton(NSMakeRect(662, h - 30 - 24, 50, 24), self.langIsEnglish ? @"KO" : @"EN", [NSColor colorWithCalibratedRed:0.13 green:0.14 blue:0.14 alpha:1.0], [NSColor colorWithCalibratedRed:0.184 green:1.0 blue:0.678 alpha:1.0], [NSColor colorWithCalibratedRed:0.184 green:1.0 blue:0.678 alpha:1.0]);
     drawHudButton(NSMakeRect(742, h - 10 - 20, 24, 20), @"-", [NSColor colorWithCalibratedRed:0.13 green:0.14 blue:0.14 alpha:1.0], [NSColor colorWithCalibratedRed:0.24 green:0.25 blue:0.25 alpha:1.0], [NSColor whiteColor]);
     drawHudButton(NSMakeRect(772, h - 10 - 20, 24, 20), @"X", [NSColor colorWithCalibratedRed:0.13 green:0.14 blue:0.14 alpha:1.0], [NSColor colorWithCalibratedRed:0.24 green:0.25 blue:0.25 alpha:1.0], [NSColor colorWithCalibratedRed:1.0 green:0.27 blue:0.0 alpha:1.0]);
 
@@ -261,31 +276,48 @@ static void drawHudButton(NSRect rect, NSString *label, NSColor *bgColor, NSColo
     drawKeyCap(NSMakeRect(462, h - 296 - 48, 48, 48), @"Opt", @"", 0);
     drawKeyCap(NSMakeRect(516, h - 296 - 48, 48, 48), @"Cmd", @"", 0);
 
-    // 3. SPEED SENS (마우스 민감도 조절 패널)
+    // 3. SPEED SENS (마우스 민감도 조절 및 제어 패널)
     NSRect sensPanelRect = NSMakeRect(638, h - 80 - 264, 140, 264);
     NSBezierPath *sensPath = [NSBezierPath bezierPathWithRoundedRect:sensPanelRect xRadius:10.0 yRadius:10.0];
     [[NSColor colorWithCalibratedRed:0.09 green:0.09 blue:0.09 alpha:1.0] setFill];
     [sensPath fill];
-    [[NSColor colorWithCalibratedRed:0.68 green:1.0 blue:0.18 alpha:0.8] setStroke];
+
+    // SPEED SENS 패널 그림자 테두리 (Dark Forest Green)
+    NSRect sensShadowRect = NSMakeRect(sensPanelRect.origin.x + 1, sensPanelRect.origin.y - 1, sensPanelRect.size.width, sensPanelRect.size.height);
+    NSBezierPath *sensShadowPath = [NSBezierPath bezierPathWithRoundedRect:sensShadowRect xRadius:10.0 yRadius:10.0];
+    [[NSColor colorWithCalibratedRed:0.0 green:0.302 blue:0.125 alpha:0.8] setStroke];
+    [sensShadowPath setLineWidth:1.5];
+    [sensShadowPath stroke];
+
+    // SPEED SENS 패널 메인 테두리 (Keysor Neon Green)
+    [[NSColor colorWithCalibratedRed:0.184 green:1.0 blue:0.678 alpha:0.8] setStroke];
     [sensPath setLineWidth:1.5];
     [sensPath stroke];
 
     // SPEED SENS 타이틀
-    NSDictionary *sensTitleAttrs = @{ NSFontAttributeName: [NSFont boldSystemFontOfSize:13.0], NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.68 green:1.0 blue:0.18 alpha:1.0] };
+    NSDictionary *sensTitleShadowAttrs = @{ NSFontAttributeName: [NSFont boldSystemFontOfSize:13.0], NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.0 green:0.302 blue:0.125 alpha:1.0] };
+    [@"SPEED SENS" drawAtPoint:NSMakePoint(661, h - 90 - 15) withAttributes:sensTitleShadowAttrs];
+
+    NSDictionary *sensTitleAttrs = @{ NSFontAttributeName: [NSFont boldSystemFontOfSize:13.0], NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.184 green:1.0 blue:0.678 alpha:1.0] };
     [@"SPEED SENS" drawAtPoint:NSMakePoint(660, h - 90 - 16) withAttributes:sensTitleAttrs];
 
     // 수치 디스플레이
     NSString *spdStr = [NSString stringWithFormat:@"%.1f", self.baseSpeed > 0 ? self.baseSpeed : 1.5];
     NSDictionary *spdAttrs = @{ NSFontAttributeName: [NSFont boldSystemFontOfSize:22.0], NSForegroundColorAttributeName: [NSColor whiteColor] };
     NSSize spdSz = [spdStr sizeWithAttributes:spdAttrs];
-    [spdStr drawAtPoint:NSMakePoint(638 + (140 - spdSz.width)/2.0, h - 130 - 24) withAttributes:spdAttrs];
+    [spdStr drawAtPoint:NSMakePoint(638 + (140 - spdSz.width)/2.0, h - 122 - 24) withAttributes:spdAttrs];
 
-    // + / - 버튼
-    drawHudButton(NSMakeRect(654, h - 175 - 28, 48, 28), @"+", [NSColor colorWithCalibratedRed:0.13 green:0.14 blue:0.14 alpha:1.0], [NSColor colorWithCalibratedRed:0.68 green:1.0 blue:0.18 alpha:1.0], [NSColor colorWithCalibratedRed:0.68 green:1.0 blue:0.18 alpha:1.0]);
-    drawHudButton(NSMakeRect(714, h - 175 - 28, 48, 28), @"-", [NSColor colorWithCalibratedRed:0.13 green:0.14 blue:0.14 alpha:1.0], [NSColor colorWithCalibratedRed:0.68 green:1.0 blue:0.18 alpha:1.0], [NSColor colorWithCalibratedRed:0.68 green:1.0 blue:0.18 alpha:1.0]);
+    // - / + 속도 조절 버튼 (왼쪽: -, 오른쪽: +)
+    drawHudButton(NSMakeRect(650, h - 156 - 26, 54, 26), @"-", [NSColor colorWithCalibratedRed:0.13 green:0.14 blue:0.14 alpha:1.0], [NSColor colorWithCalibratedRed:0.184 green:1.0 blue:0.678 alpha:1.0], [NSColor colorWithCalibratedRed:0.184 green:1.0 blue:0.678 alpha:1.0]);
+    drawHudButton(NSMakeRect(712, h - 156 - 26, 54, 26), @"+", [NSColor colorWithCalibratedRed:0.13 green:0.14 blue:0.14 alpha:1.0], [NSColor colorWithCalibratedRed:0.184 green:1.0 blue:0.678 alpha:1.0], [NSColor colorWithCalibratedRed:0.184 green:1.0 blue:0.678 alpha:1.0]);
 
-    // 4. 하단 안내 문구
-    NSString *info1 = self.langIsEnglish ? @"※ All alphabet typing is blocked during mouse mode." : @"※ 마우스 모드 중 모든 알파벳 키 타이핑은 차단됩니다.";
+    // SPEED SENS 패널 하단 제어 버튼들 (그리드 모드, 자석 모드, 상세보기)
+    drawHudButton(NSMakeRect(650, h - 192 - 24, 116, 24), self.langIsEnglish ? @"Grid Mode" : @"그리드 모드", [NSColor colorWithCalibratedRed:0.13 green:0.14 blue:0.14 alpha:1.0], [NSColor colorWithCalibratedRed:0.24 green:0.25 blue:0.25 alpha:1.0], [NSColor whiteColor]);
+    drawHudButton(NSMakeRect(650, h - 222 - 24, 116, 24), self.langIsEnglish ? @"Magnet Mode" : @"자석 모드", [NSColor colorWithCalibratedRed:0.13 green:0.14 blue:0.14 alpha:1.0], [NSColor colorWithCalibratedRed:0.24 green:0.25 blue:0.25 alpha:1.0], [NSColor whiteColor]);
+    drawHudButton(NSMakeRect(650, h - 252 - 24, 116, 24), self.langIsEnglish ? @"Details" : @"상세보기", [NSColor colorWithCalibratedRed:0.13 green:0.14 blue:0.14 alpha:1.0], [NSColor colorWithCalibratedRed:0.184 green:1.0 blue:0.678 alpha:1.0], [NSColor colorWithCalibratedRed:0.184 green:1.0 blue:0.678 alpha:1.0]);
+
+    // 4. 하단 안내 문구 (Windows GDI 동일 문구 적용)
+    NSString *info1 = self.langIsEnglish ? @"※ All alphabet typing is blocked during mouse mode (except Ctrl/Alt/Cmd shortcuts)." : @"※ 마우스 모드 중 모든 알파벳 키 타이핑은 차단됩니다 (Ctrl, Alt, Cmd 단축키 예외 허용).";
     NSString *info2 = self.langIsEnglish ? @"• Press Caps Lock again to return to normal keyboard mode." : @"• Caps Lock을 한 번 더 누르면 일반 키보드 상태로 복귀합니다.";
     NSString *info3 = self.langIsEnglish ? @"• Automatically minimizes when mouse mode is active." : @"• 마우스 활성화 시 자동으로 최소화 됩니다.";
 
@@ -327,8 +359,17 @@ static void drawHudButton(NSRect rect, NSString *label, NSColor *bgColor, NSColo
         return;
     }
 
-    // + 속도 증가
-    if (NSPointInRect(p, NSMakeRect(654, h - 175 - 28, 48, 28))) {
+    // - 속도 감소 (왼쪽 버튼)
+    if (NSPointInRect(p, NSMakeRect(650, h - 156 - 26, 54, 26))) {
+        self.baseSpeed -= 0.5;
+        if (self.baseSpeed < 0.1) self.baseSpeed = 0.1;
+        [self setNeedsDisplay:YES];
+        keysor_macos_on_speed_change(-0.5);
+        return;
+    }
+
+    // + 속도 증가 (오른쪽 버튼)
+    if (NSPointInRect(p, NSMakeRect(712, h - 156 - 26, 54, 26))) {
         self.baseSpeed += 0.5;
         if (self.baseSpeed > 10.0) self.baseSpeed = 10.0;
         [self setNeedsDisplay:YES];
@@ -336,12 +377,9 @@ static void drawHudButton(NSRect rect, NSString *label, NSColor *bgColor, NSColo
         return;
     }
 
-    // - 속도 감수
-    if (NSPointInRect(p, NSMakeRect(714, h - 175 - 28, 48, 28))) {
-        self.baseSpeed -= 0.5;
-        if (self.baseSpeed < 0.1) self.baseSpeed = 0.1;
-        [self setNeedsDisplay:YES];
-        keysor_macos_on_speed_change(-0.5);
+    // 상세보기 버튼 클릭 (설정 파일/안내 웹 열기)
+    if (NSPointInRect(p, NSMakeRect(650, h - 252 - 24, 116, 24))) {
+        [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://keysor.vercel.app"]];
         return;
     }
 
@@ -393,6 +431,7 @@ void keysor_macos_show_hud(void) {
             [g_hudWindow setLevel:NSModalPanelWindowLevel];
             [g_hudWindow makeKeyAndOrderFront:nil];
             [g_hudWindow orderFrontRegardless];
+            [NSApp activateIgnoringOtherApps:YES];
             [g_hudWindow display];
         }
     });
@@ -406,6 +445,11 @@ void keysor_macos_post_show_hud_notification(void) {
 }
 
 @implementation KeysorAppDelegate
+
+- (void)handleReopenEvent:(NSAppleEventDescriptor *)event withReplyEvent:(NSAppleEventDescriptor *)replyEvent {
+    NSLog(@"[Keysor ObjC] handleReopenEvent (Dock Click) received!");
+    keysor_macos_show_hud();
+}
 
 - (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)flag {
     NSLog(@"[Keysor ObjC] applicationShouldHandleReopen called! hasVisibleWindows=%d", flag);
@@ -446,10 +490,15 @@ void keysor_macos_ui_init(void) {
     if (g_overlayWindow != nil) return;
 
     void (^initBlock)(void) = ^{
-        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
         g_appDelegate = [[KeysorAppDelegate alloc] init];
         [NSApp setDelegate:g_appDelegate];
         [NSApp finishLaunching];
+
+        [[NSAppleEventManager sharedAppleEventManager] setEventHandler:g_appDelegate
+                                                           andSelector:@selector(handleReopenEvent:withReplyEvent:)
+                                                         forEventClass:kCoreEventClass
+                                                            andEventID:kAEReopenApplication];
 
         [[NSDistributedNotificationCenter defaultCenter] addObserverForName:@"KeysorShowHudNotification"
                                                                       object:nil
