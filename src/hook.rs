@@ -363,6 +363,8 @@ fn start_movement_thread(state_ptr: Arc<Mutex<AppState>>) {
                 )
             };
 
+            let is_moving = movement_settings.is_some();
+
             // 1. 이동 연산 처리 (락이 이미 릴리즈된 상태에서 계산 및 API 호출)
             process_mouse_movement(
                 &state_ptr,
@@ -377,7 +379,7 @@ fn start_movement_thread(state_ptr: Arc<Mutex<AppState>>) {
             if is_mouse_mode {
                 crate::indicator::update_indicator_position();
                 crate::indicator::check_magnetic_snapping();
-                crate::indicator::check_global_magnetic_snapping();
+                crate::indicator::check_global_magnetic_snapping(is_moving);
 
                 // 누르고 있는 동안 커서 인디케이터 색상 실시간 유지
                 let current_click_type = {

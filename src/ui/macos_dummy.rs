@@ -26,7 +26,17 @@ pub extern "C" fn keysor_macos_on_lang_toggle() {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn keysor_macos_on_speed_change(delta: f64) {
+pub extern "C" fn keysor_macos_get_base_speed() -> f64 {
+    if let Some(state_arc) = crate::hook::APP_STATE.get() {
+        if let Ok(state) = state_arc.lock() {
+            return state.config.settings.base_speed;
+        }
+    }
+    1.5
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn keysor_macos_on_speed_change(delta: f64) -> f64 {
     let mut config_to_save = None;
     let mut new_spd = 1.5;
     if let Some(state_arc) = crate::hook::APP_STATE.get() {
@@ -46,6 +56,88 @@ pub extern "C" fn keysor_macos_on_speed_change(delta: f64) {
     unsafe {
         keysor_macos_ui_update_speed_display(new_spd);
     }
+    new_spd
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn keysor_macos_check_autostart_status() -> bool {
+    let mut plist_path = std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    plist_path.push("Library");
+    plist_path.push("LaunchAgents");
+    plist_path.push("com.keysor.app.plist");
+    plist_path.exists()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn keysor_macos_on_autostart_toggle() -> bool {
+    let current_status = keysor_macos_check_autostart_status();
+    let new_status = !current_status;
+    let _ = get_system_controller().register_startup(new_status);
+    new_status
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn keysor_macos_check_is_snapped() -> bool {
+    crate::platform::macos::magnet::is_currently_snapped()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn keysor_macos_check_magnet_status() -> bool {
+    if let Some(state_arc) = crate::hook::APP_STATE.get() {
+        if let Ok(state) = state_arc.lock() {
+            return state.config.settings.magnetic_mode.unwrap_or(false);
+        }
+    }
+    false
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn keysor_macos_check_grid_status() -> bool {
+    if let Some(state_arc) = crate::hook::APP_STATE.get() {
+        if let Ok(state) = state_arc.lock() {
+            return state.config.settings.pixel_mode.unwrap_or(false);
+        }
+    }
+    false
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn keysor_macos_on_grid_toggle() -> bool {
+    let mut new_status = false;
+    let mut config_to_save = None;
+    if let Some(state_arc) = crate::hook::APP_STATE.get() {
+        if let Ok(mut state) = state_arc.lock() {
+            let cur = state.config.settings.pixel_mode.unwrap_or(false);
+            new_status = !cur;
+            state.config.settings.pixel_mode = Some(new_status);
+            config_to_save = Some(state.config.clone());
+        }
+    }
+    if let Some(cfg) = config_to_save {
+        crate::config::save_config(&cfg);
+    }
+    new_status
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn keysor_macos_on_magnet_toggle() -> bool {
+    let mut new_status = false;
+    let mut config_to_save = None;
+    if let Some(state_arc) = crate::hook::APP_STATE.get() {
+        if let Ok(mut state) = state_arc.lock() {
+            let cur = state.config.settings.magnetic_mode.unwrap_or(false);
+            new_status = !cur;
+            state.config.settings.magnetic_mode = Some(new_status);
+            state.config.settings.global_magnetic_mode = Some(new_status);
+            config_to_save = Some(state.config.clone());
+        }
+    }
+    if let Some(cfg) = config_to_save {
+        crate::config::save_config(&cfg);
+    }
+    new_status
 }
 
 static IS_VISIBLE: AtomicBool = AtomicBool::new(false);
@@ -111,11 +203,15 @@ impl KeysorUi for MacosDummyUi {
         }
     }
 
-    fn check_magnetic_snapping(&self) {}
+    fn check_magnetic_snapping(&self) {
+        crate::platform::macos::magnet::check_macos_magnetic_snapping(false);
+    }
 
-    fn check_global_magnetic_snapping(&self) {}
+    fn check_global_magnetic_snapping(&self, is_moving: bool) {
+        crate::platform::macos::magnet::check_macos_global_magnetic_snapping(is_moving);
+    }
 
     fn is_currently_snapped(&self) -> bool {
-        false
+        crate::platform::macos::magnet::is_currently_snapped()
     }
 }

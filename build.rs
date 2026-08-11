@@ -11,6 +11,7 @@ fn main() {
     {
         println!("cargo:rustc-link-lib=framework=AppKit");
         println!("cargo:rustc-link-lib=framework=QuartzCore");
+        println!("cargo:rustc-link-lib=framework=Carbon");
         println!("cargo:rerun-if-changed=src/platform/macos/overlay.m");
         cc::Build::new()
             .file("src/platform/macos/overlay.m")

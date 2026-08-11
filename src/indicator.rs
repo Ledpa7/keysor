@@ -29,8 +29,8 @@ pub fn check_magnetic_snapping() {
     crate::ui::get_ui().check_magnetic_snapping();
 }
 
-pub fn check_global_magnetic_snapping() {
-    crate::ui::get_ui().check_global_magnetic_snapping();
+pub fn check_global_magnetic_snapping(is_moving: bool) {
+    crate::ui::get_ui().check_global_magnetic_snapping(is_moving);
 }
 
 pub fn is_currently_snapped() -> bool {

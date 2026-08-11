@@ -27,7 +27,7 @@ pub trait KeysorUi: Send + Sync + 'static {
 
 
     /// Perform global magnetic snapping check
-    fn check_global_magnetic_snapping(&self);
+    fn check_global_magnetic_snapping(&self, is_moving: bool);
 
     /// Check if the cursor is currently snapped
     fn is_currently_snapped(&self) -> bool;

@@ -83,7 +83,7 @@ impl KeysorUi for WindowsGdiUi {
         crate::ui::win_uia::check_magnetic_snapping();
     }
 
-    fn check_global_magnetic_snapping(&self) {
+    fn check_global_magnetic_snapping(&self, _is_moving: bool) {
         crate::ui::win_uia::check_global_magnetic_snapping();
     }
 
@@ -1280,6 +1280,35 @@ fn toggle_magnet() {
     }
 }
 
+fn toggle_autostart() -> bool {
+    let controller = crate::platform::get_system_controller();
+    let is_autostart = check_autostart_status_win();
+    let next_status = !is_autostart;
+    let _ = controller.register_startup(next_status);
+    next_status
+}
+
+fn check_autostart_status_win() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::System::Registry::*;
+        unsafe {
+            let mut key: HKEY = std::ptr::null_mut();
+            let subkey = encode_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+            let res = RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut key);
+            if res == 0 && !key.is_null() {
+                let val_name = encode_wide("Keysor");
+                let mut type_reg: u32 = 0;
+                let mut cb_data: u32 = 0;
+                let query_res = RegQueryValueExW(key, val_name.as_ptr(), std::ptr::null_mut(), &mut type_reg, std::ptr::null_mut(), &mut cb_data);
+                RegCloseKey(key);
+                return query_res == 0;
+            }
+        }
+    }
+    false
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 enum HudHitTarget {
@@ -1292,6 +1321,7 @@ enum HudHitTarget {
     ToggleLanguage = 6,
     ToggleMagnet = 7,
     ToggleDetail = 8,
+    ToggleAutoStart = 9,
     BuyProTop = 10,
     LicenseTop = 11,
     EditBaseSpeed = 12,
@@ -1301,13 +1331,13 @@ enum HudHitTarget {
 
 fn classify_hit_target(x: i16, y: i16, features_enabled: bool, is_pro: bool) -> HudHitTarget {
     if !features_enabled {
-        if y >= 80 && y <= 344 && x >= 638 && x <= 778 {
+        if y >= 80 && y <= 374 && x >= 634 && x <= 782 {
             return HudHitTarget::ToggleMagnet;
         }
     }
 
     if SHOW_ALL_SENS.load(Ordering::SeqCst) && features_enabled {
-        if x >= 653 && x <= 773 {
+        if x >= 648 && x <= 772 {
             if y >= 114 && y <= 132 {
                 return HudHitTarget::EditBaseSpeed;
             } else if y >= 132 && y <= 150 {
@@ -1337,24 +1367,29 @@ fn classify_hit_target(x: i16, y: i16, features_enabled: bool, is_pro: bool) -> 
         }
     }
     if y >= 170 && y <= 202 {
-        if x >= 658 && x <= 698 {
+        if x >= 644 && x <= 704 {
             return HudHitTarget::DecSensitivity;
-        } else if x >= 718 && x <= 758 {
+        } else if x >= 708 && x <= 768 {
             return HudHitTarget::IncSensitivity;
         }
     }
     if y >= 210 && y <= 242 {
-        if x >= 658 && x <= 758 {
+        if x >= 644 && x <= 772 {
             return HudHitTarget::TogglePixelMode;
         }
     }
     if y >= 250 && y <= 282 {
-        if x >= 658 && x <= 758 {
+        if x >= 644 && x <= 772 {
             return HudHitTarget::ToggleMagnet;
         }
     }
     if y >= 290 && y <= 322 {
-        if x >= 658 && x <= 758 {
+        if x >= 644 && x <= 772 {
+            return HudHitTarget::ToggleAutoStart;
+        }
+    }
+    if y >= 330 && y <= 362 {
+        if x >= 644 && x <= 772 {
             return HudHitTarget::ToggleDetail;
         }
     }
@@ -1817,7 +1852,15 @@ unsafe extern "system" fn hud_wnd_proc(
                 } else {
                     (0x202424, 0x3C4040, 0x888888)
                 };
-                draw_hud_button(hdc, 658, 170, 698, 202, 6, dec_bg, dec_border, dec_text_color, "-", fonts.title, 37, -3);
+                // Draw [-] Button
+                let (dec_bg, dec_border, dec_text_color) = if !(is_pro || is_trial) {
+                    (0x121414, 0x222222, 0x333333)
+                } else if hover_val == 3 {
+                    (0x3C4040, 0xADFF2F, 0xADFF2F)
+                } else {
+                    (0x202424, 0x3C4040, 0x888888)
+                };
+                draw_hud_button(hdc, 644, 170, 702, 202, 6, dec_bg, dec_border, dec_text_color, "-", fonts.title, 37, -3);
 
                 // Draw [+] Button
                 let (inc_bg, inc_border, inc_text_color) = if !(is_pro || is_trial) {
@@ -1827,9 +1870,9 @@ unsafe extern "system" fn hud_wnd_proc(
                 } else {
                     (0x202424, 0x3C4040, 0x888888)
                 };
-                draw_hud_button(hdc, 718, 170, 758, 202, 6, inc_bg, inc_border, inc_text_color, "+", fonts.title, 37, -4);
+                draw_hud_button(hdc, 710, 170, 768, 202, 6, inc_bg, inc_border, inc_text_color, "+", fonts.title, 37, -4);
 
-                // Draw Pixel Mode Toggle Button
+                // 1. Draw Grid Mode Button
                 let (pm_bg, pm_border, pm_text_color) = if !(is_pro || is_trial) {
                     (0x121414, 0x222222, 0x333333)
                 } else if pm_enabled {
@@ -1838,13 +1881,13 @@ unsafe extern "system" fn hud_wnd_proc(
                     if hover_val == 5 { (0x3C4040, 0xADFF2F, 0xFFFFFF) } else { (0x202424, 0x3C4040, 0x888888) }
                 };
                 let pm_label_str = if lang_en {
-                    if pm_enabled { "PIXEL: ON" } else { "PIXEL: OFF" }
+                    if pm_enabled { "Grid Mode: ON" } else { "Grid Mode: OFF" }
                 } else {
-                    if pm_enabled { "픽셀 단위: ON" } else { "픽셀 단위: OFF" }
+                    if pm_enabled { "그리드 모드: ON" } else { "그리드 모드: OFF" }
                 };
-                draw_hud_button(hdc, 658, 210, 758, 242, 6, pm_bg, pm_border, pm_text_color, pm_label_str, fonts.key, 37, 0);
+                draw_hud_button(hdc, 644, 210, 772, 242, 6, pm_bg, pm_border, pm_text_color, pm_label_str, fonts.key, 37, 0);
 
-                // Draw Magnet Mode Toggle Button
+                // 2. Draw Magnet Mode Button
                 let magnet_enabled = {
                     let state_arc = crate::hook::APP_STATE.get();
                     state_arc.map_or(false, |arc| arc.lock().unwrap().config.settings.magnetic_mode.unwrap_or(false))
@@ -1857,13 +1900,29 @@ unsafe extern "system" fn hud_wnd_proc(
                     if hover_val == 7 { (0x3C4040, 0xADFF2F, 0xFFFFFF) } else { (0x202424, 0x3C4040, 0x888888) }
                 };
                 let mag_label_str = if lang_en {
-                    if magnet_enabled { "MAGNET: ON" } else { "MAGNET: OFF" }
+                    if magnet_enabled { "Magnet Mode: ON" } else { "Magnet Mode: OFF" }
                 } else {
                     if magnet_enabled { "자석 모드: ON" } else { "자석 모드: OFF" }
                 };
-                draw_hud_button(hdc, 658, 250, 758, 282, 6, mag_bg, mag_border, mag_text_color, mag_label_str, fonts.key, 37, 0);
+                draw_hud_button(hdc, 644, 250, 772, 282, 6, mag_bg, mag_border, mag_text_color, mag_label_str, fonts.key, 37, 0);
 
-                // Draw SENS INFO (Detail) Toggle Button
+                // 3. Draw Auto-Start Toggle Button
+                let autostart_enabled = check_autostart_status_win();
+                let (auto_bg, auto_border, auto_text_color) = if !(is_pro || is_trial) {
+                    (0x121414, 0x222222, 0x333333)
+                } else if autostart_enabled {
+                    if hover_val == 9 { (0xBCFF7A, 0xADFF2F, 0x000000) } else { (0xADFF2F, 0x3C4040, 0x000000) }
+                } else {
+                    if hover_val == 9 { (0x3C4040, 0xADFF2F, 0xFFFFFF) } else { (0x202424, 0x3C4040, 0x888888) }
+                };
+                let auto_label_str = if lang_en {
+                    if autostart_enabled { "Auto-Start: ON" } else { "Auto-Start: OFF" }
+                } else {
+                    if autostart_enabled { "자동 실행: ON" } else { "자동 실행: OFF" }
+                };
+                draw_hud_button(hdc, 644, 290, 772, 322, 6, auto_bg, auto_border, auto_text_color, auto_label_str, fonts.key, 37, 0);
+
+                // 4. Draw Details Toggle Button
                 let sens_info_enabled = SHOW_ALL_SENS.load(Ordering::SeqCst);
                 let (si_bg, si_border, si_text_color) = if !(is_pro || is_trial) {
                     (0x121414, 0x222222, 0x333333)
@@ -1872,12 +1931,12 @@ unsafe extern "system" fn hud_wnd_proc(
                 } else {
                     if hover_val == 8 { (0x3C4040, 0xADFF2F, 0xFFFFFF) } else { (0x202424, 0x3C4040, 0x888888) }
                 };
-                let si_label_str = if lang_en {
-                    "VIEW DETAIL"
+                let si_label_str = if sens_info_enabled {
+                    if lang_en { "Standard" } else { "기본보기" }
                 } else {
-                    "상세 감도 보기"
+                    if lang_en { "Details" } else { "상세보기" }
                 };
-                draw_hud_button(hdc, 658, 290, 758, 322, 6, si_bg, si_border, si_text_color, si_label_str, fonts.key, 37, 0);
+                draw_hud_button(hdc, 644, 330, 772, 362, 6, si_bg, si_border, si_text_color, si_label_str, fonts.key, 37, 0);
 
                 if !(is_pro || is_trial) {
                     let lock_icon = encode_wide("🔒");
@@ -2016,6 +2075,7 @@ unsafe extern "system" fn hud_wnd_proc(
                         }
                     }
                     HudHitTarget::Close => {
+                        crate::restore_windows_system_cursor();
                         if let Some(&main_hwnd) = MAIN_HWND.get() {
                             windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW(
                                 main_hwnd,
@@ -2063,6 +2123,9 @@ unsafe extern "system" fn hud_wnd_proc(
                                 }
                                 HudHitTarget::ToggleMagnet => {
                                     toggle_magnet();
+                                }
+                                HudHitTarget::ToggleAutoStart => {
+                                    toggle_autostart();
                                 }
                                 HudHitTarget::ToggleDetail => {
                                     let prev = SHOW_ALL_SENS.load(Ordering::SeqCst);

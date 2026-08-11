@@ -54,7 +54,78 @@ fn ensure_single_instance() -> bool {
     true
 }
 
+#[cfg(target_os = "windows")]
+pub fn restore_windows_system_cursor() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPIF_SENDCHANGE, SPI_SETCURSORS};
+    unsafe {
+        SystemParametersInfoW(SPI_SETCURSORS, 0, std::ptr::null_mut(), SPIF_SENDCHANGE);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn run_windows_watchdog(parent_pid: u32) {
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, SYNCHRONIZE};
+    use windows_sys::Win32::System::Threading::WaitForSingleObject;
+
+    unsafe {
+        // 켜지자마자 이전 남아있을 수 있는 투명 커서 1차 복구 (Self-Healing)
+        restore_windows_system_cursor();
+
+        let h_process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION, 0, parent_pid);
+        if !h_process.is_null() {
+            // CPU 점유율 0.00% 완전 수면 상태로 부모(메인 키서) 프로세스 강제종료/사망 감시 대기
+            WaitForSingleObject(h_process, 0xFFFFFFFF); // INFINITE
+            windows_sys::Win32::Foundation::CloseHandle(h_process);
+        }
+
+        // 메인 키서 종료/강제종료 감지 시 0.001초 만에 마우스 커서 100% 복구
+        restore_windows_system_cursor();
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn spawn_watchdog_subprocess() {
+    if let Ok(exe_path) = std::env::current_exe() {
+        let parent_pid = std::process::id();
+        let _ = std::process::Command::new(exe_path)
+            .args(["--watchdog", &parent_pid.to_string()])
+            .spawn();
+    }
+}
+
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    #[cfg(target_os = "windows")]
+    if args.len() >= 3 && args[1] == "--watchdog" {
+        if let Ok(pid) = args[2].parse::<u32>() {
+            run_windows_watchdog(pid);
+            return;
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // 1. 키서 구동 즉시 커서 0.1초 원복 (Self-Healing)
+        restore_windows_system_cursor();
+
+        // 2. 튕김/파닉 크래시 예외 핸들러 등록 (비상 에어백)
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |panic_info| {
+            restore_windows_system_cursor();
+            default_hook(panic_info);
+        }));
+
+        unsafe {
+            unsafe extern "system" fn win32_crash_exception_filter(_: *mut windows_sys::Win32::System::Diagnostics::Debug::EXCEPTION_POINTERS) -> i32 {
+                restore_windows_system_cursor();
+                1 // EXCEPTION_EXECUTE_HANDLER
+            }
+            windows_sys::Win32::System::Diagnostics::Debug::SetUnhandledExceptionFilter(Some(win32_crash_exception_filter));
+        }
+
+        // 3. 커널 강제종료(taskkill /F) 감지 워치독 보조 프로세스 가동 (CPU 0.00%, RAM < 1MB)
+        spawn_watchdog_subprocess();
+    }
     #[cfg(target_os = "macos")]
     if !ensure_single_instance() {
         println!("[Keysor] Duplicate process detected. Terminating duplicate instance.");

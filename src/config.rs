@@ -163,29 +163,76 @@ bindings:
     match serde_yaml::from_str::<Config>(&content) {
         Ok(cfg) => cfg,
         Err(e) => {
-            eprintln!("[Warning] Config parse error: {}. Using default fallback configuration.", e);
-            
-            // 윈도우 네이티브 경고창 노출
+            eprintln!("[Warning] Config parse error: {}. Creating backup keysor.yaml.bak and restoring defaults.", e);
+            let bak_path = path.as_ref().with_extension("yaml.bak");
+            std::fs::copy(path.as_ref(), &bak_path).ok();
+
+            // 깨진 구문 자동 복구: 디폴트 얌 내용 재작성
+            let default_yaml = r#"# keysor.yaml - 키서 단축키 및 동작 설정 파일 (자동 복구됨)
+settings:
+  modifier_mode: "Toggle"        # "Hold" (Caps Lock을 누르는 동안에만 조작) 또는 "Toggle" (켜고 끄기)
+  modifier_key: "CapsLock"     # 활성화 단축키 (기본값 CapsLock)
+
+  base_speed: 1.5              # 마우스 시작 속도 (픽셀 단위)
+  max_speed: 30.0              # 마우스 최대 속도 (픽셀 단위)
+  acceleration: 1.5            # 누르고 있을 때의 가속도 비율
+
+  unified_space_click: true
+  double_click_threshold_ms: 100
+  drag_hold_threshold_ms: 250
+  refresh_rate_hz: 100         # 이동 주기 주사율 (기본값 100Hz)
+  magnetic_mode: false
+  global_magnetic_mode: false
+  magnetic_sensitivity: 1.3
+  lang_en: true
+  license_key: ""
+
+bindings:
+  - trigger: "W"
+    action: "MouseMoveUp"
+  - trigger: "S"
+    action: "MouseMoveDown"
+  - trigger: "A"
+    action: "MouseMoveLeft"
+  - trigger: "D"
+    action: "MouseMoveRight"
+  - trigger: "R"
+    action: "MouseScrollUp"
+  - trigger: "F"
+    action: "MouseScrollDown"
+  - trigger: "Q"
+    action: "MouseScrollLeft"
+  - trigger: "E"
+    action: "MouseScrollRight"
+  - trigger: "G"
+    action: "MouseRightClick"
+  - trigger: "RightShift"
+    action: "MouseRightClick"
+"#;
+            std::fs::write(path.as_ref(), default_yaml).ok();
+
+            // 경고 안내 출력
             unsafe {
                 let err_msg = e.to_string();
                 let lang_en = default_cfg.settings.lang_en.unwrap_or(true);
                 let msg = if lang_en {
-                    format!("Warning: Failed to load config file (keysor.yaml) due to a parsing error. Keysor has reverted to the default configuration.\n\nPlease check if the file contains invalid characters or has been saved with UTF-8 encoding (not ANSI/CP949).\n\nDetails: {}", err_msg)
+                    format!("Warning: Failed to load config file (keysor.yaml) due to a parsing error.\n\nKeysor has backed up your broken file to 'keysor.yaml.bak' and restored a clean default configuration.\n\nError: {}", err_msg)
                 } else {
-                    format!("경고: 설정 파일(keysor.yaml) 파싱 오류로 인해 기본 설정값으로 복원되었습니다.\n\n메모장 등으로 주석 수정 시 인코딩이 UTF-8로 저장되었는지 확인해 주세요. (ANSI/CP949 저장 시 인식 불가)\n\n상세 오류: {}", err_msg)
+                    format!("경고: 설정 파일(keysor.yaml) 문법 오류로 깨진 기존 파일이 'keysor.yaml.bak'으로 안전 백업되고 기본 설정으로 자동 복구되었습니다.\n\n상세 오류: {}", err_msg)
                 };
-                let title = if lang_en { "Keysor Config Warning" } else { "Keysor 설정 로드 경고" };
-                
-                let msg_wide: Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
-                let title_wide: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
+                let title = if lang_en { "Keysor Config Auto-Recovered" } else { "Keysor 설정 자동 복구 완료" };
                 
                 #[cfg(windows)]
-                windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
-                    0,
-                    msg_wide.as_ptr(),
-                    title_wide.as_ptr(),
-                    0x30, // MB_ICONWARNING
-                );
+                {
+                    let msg_wide: Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
+                    let title_wide: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
+                    windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
+                        0,
+                        msg_wide.as_ptr(),
+                        title_wide.as_ptr(),
+                        0x30,
+                    );
+                }
                 #[cfg(not(windows))]
                 eprintln!("[{}] {}", title, msg);
             }
