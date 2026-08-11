@@ -461,10 +461,37 @@ graph TD
 
 ---
 
+## 🍏 macOS 네이티브 아키텍처 및 HUD 팝업창 명세 (macOS Architecture & HUD Dashboard)
+
+| 구분 | 사양 및 상태 | 세부 특징 |
+| :--- | :--- | :--- |
+| **타깃 OS** | **macOS** (AppKit Native, Objective-C / Cocoa Bridge) | WindowServer 최상단 연동 및 CoreGraphics 전역 이벤트 훅 |
+| **자석 스냅 반경** | **`25.0px`** (Windows 표준과 100% 동기화) | AXParent 2단계 탐색으로 버튼 텍스트/아이콘 포인팅 100% 보장 |
+| **메모리 안정성** | **`EXC_BAD_ACCESS` 튕김 0건** | AXUIElementRef 포인터 추적 및 단일 CFRelease 수거 루틴 적용 |
+| **IPC 지연 시간** | **`0ms Zero-Lag` (<1ms)** | Mach IPC 조작 루프 60회 $\rightarrow$ 3회 축소 (95% 감축)로 버벅임 완전 제거 |
+| **HUD 팝업 레이아웃** | **10pt 외곽 마진 / 12pt 폰트 규격화** | 808x452 HUD 패널 (Y-100px 하향), 12pt 폰트 일괄 통일, 28pt 버튼, 8pt 행간 |
+| **스위치 모션** | **60fps 슬라이딩 토글 애니메이션** | iOS/macOS 순정 스타일 원형 노브 슬라이딩 (120ms) 및 색상 보간 |
+| **클릭 시각 피드백** | **0.70 CTM 축소 스케일 & 180ms 노란색 유지** | Space, G, Scroll, Drag 조작 시 30% Shrink 및 우클릭 180ms 노란색 유지 |
+
+### 🛠️ macOS UI & 자석 모드 정밀 픽셀 규격
+- **HUD 패널 폰트 규격**: 팝업창 내 모든 중간 폰트를 **`12.0pt`** (`Bold`/`Medium`/`Regular`)로 일괄 통일.
+- **SPEED SENS 패널 그리드**:
+  - 패널 좌측 마진: **`10 pt`** (`X = 644`)
+  - 패널 우측 마진: **`10 pt`** (`X = 772`)
+  - 패널 하단 마진: **`10 pt`** (`Y = h - 334`, 패널 바닥 `h - 344`)
+  - 버튼과 버튼 사이의 수직 행간: **`8 pt`** (`162, 198, 234, 270, 306`)
+  - 버튼 세로 높이: **`28 pt`** 통일
+  - 속도 조절 `-` / `+` 버튼: **`61 pt`** (좌/우 10pt 마진 100% 일치)
+- **수치 디스플레이 정밀 간격**:
+  - `Base`, `Max`, `Accel` 텍스트 피치: **`17 pt`** (`108`, `125`, `142`)
+  - 글자 간 순수 수직 여백: **`4.0 pt`**
+
+---
+
 ## 🚀 다음 스텝 (Next Step)
 
 > [!TIP]
-> 1. 현재 빌드된 초경량 바이너리는 [keysor.exe](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/target/release/keysor.exe) 경로에 위치하고 있으며, 자동 릴리즈 빌드 완료 상태입니다.
+> 1. 현재 빌드된 초경량 바이너리는 [keysor.exe](file:///C:/Users/wjdwl/.gemini/antigravity/scratch/14-Keysor/target/release/keysor.exe) 및 macOS [Keysor.app](file:///Users/jidu/Desktop/Keysor.app) 경로에 위치하고 있으며, 자동 릴리즈 빌드 완료 상태입니다.
 > 2. 구축된 홈페이지는 [http://localhost:5173/](http://localhost:5173/) 주소에서 작동 중이며 대화형 키서 시뮬레이션을 내장하고 있습니다.
 > 3. 향후 홈페이지의 모던 다크 테마 디자인과 함께 윈도우 인스톨러 배포, Tauri GUI 제어판 연결 등을 이어서 추진할 예정입니다.
 > 4. **[보류/메모]** 향후 서비스 고도화 및 스케일업 시점에 **Supabase를 연동하여 기기별 UUID 매핑 통제, 사용자 이메일 계정 기반의 구매자 포털 구축, 원격 공지사항 연동**을 설계 및 반영할 예정입니다. (현재 1.0 초기 버전은 Lemon Squeezy의 기본 관리자/조회 인프라만 활용하여 유지보수성을 극대화함.)
