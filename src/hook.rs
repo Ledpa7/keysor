@@ -861,6 +861,20 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
             }
         }
 
+        // 1. 키서 프로그램 완전 종료 핫키: Ctrl + Alt + K
+        if event.is_keydown && event.vk_code == 0x4B /* VK_K */ {
+            if let Ok(mut state) = state_arc.try_lock() {
+                if state.ctrl_pressed && state.alt_pressed {
+                    println!("[Shutdown] Ctrl + Alt + K detected. Terminating Keysor cleanly.");
+                    state.deactivate_mouse_mode();
+                    #[cfg(windows)]
+                    crate::ui::win_gdi::force_restore_system_cursor();
+                    crate::hook::cleanup_hook();
+                    std::process::exit(0);
+                }
+            }
+        }
+
         // Win+Tab, Alt+Tab 단축키 시작 감지 및 강제 커서 복원
         if event.vk_code == 0x09 && event.is_keydown {
             if let Ok(state) = state_arc.try_lock() {
