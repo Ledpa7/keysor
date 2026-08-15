@@ -55,24 +55,7 @@ fn ensure_single_instance() -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn check_toggle_and_single_instance() -> bool {
-    // 1. Ctrl + Alt + K 종료 직후 Windows 쉘 바로가기가 프로세스를 재시작시키는 것을 억제
-    let flag_path = std::env::temp_dir().join("keysor_toggle_off.flag");
-    if let Ok(metadata) = std::fs::metadata(&flag_path) {
-        if let Ok(modified) = metadata.modified() {
-            if let Ok(elapsed) = modified.elapsed() {
-                if elapsed < std::time::Duration::from_millis(2500) {
-                    let _ = std::fs::remove_file(&flag_path);
-                    println!("[Toggle] Suppression flag active (<2.5s). Exiting new instance (Toggle OFF successful).");
-                    restore_windows_system_cursor();
-                    return false;
-                }
-            }
-        }
-    }
-    let _ = std::fs::remove_file(&flag_path);
-
-    // 2. 이미 다른 Keysor 메인 프로세스가 구동 중인 경우 단일 인스턴스 보장
+fn ensure_single_instance_win() -> bool {
     use windows_sys::Win32::System::Threading::CreateMutexW;
     use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
 
@@ -157,8 +140,8 @@ fn main() {
             }
         }
 
-        // 1. 단일 인스턴스 토글 스위치 (종료 직후 재실행 억제 및 중복 실행 방지)
-        if !check_toggle_and_single_instance() {
+        // 1. 단일 인스턴스 보장 (중복 실행 방지)
+        if !ensure_single_instance_win() {
             return;
         }
     }
