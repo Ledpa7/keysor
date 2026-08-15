@@ -861,16 +861,11 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
             }
         }
 
-        // 1. 키서 프로그램 완전 종료 핫키: Ctrl + Alt + K
+        // 1. 키서 프로그램 완전 종료/토글 핫키: Ctrl + Alt + K (Windows 바로가기 핫키와 연동되어 토글되도록 Pass)
         if event.is_keydown && event.vk_code == 0x4B /* VK_K */ {
-            if let Ok(mut state) = state_arc.try_lock() {
+            if let Ok(state) = state_arc.try_lock() {
                 if state.ctrl_pressed && state.alt_pressed {
-                    println!("[Shutdown] Ctrl + Alt + K detected. Terminating Keysor cleanly.");
-                    state.deactivate_mouse_mode();
-                    #[cfg(windows)]
-                    crate::ui::win_gdi::force_restore_system_cursor();
-                    crate::hook::cleanup_hook();
-                    std::process::exit(0);
+                    return HookResult::Pass;
                 }
             }
         }

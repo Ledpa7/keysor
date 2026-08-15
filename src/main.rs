@@ -55,6 +55,41 @@ fn ensure_single_instance() -> bool {
 }
 
 #[cfg(target_os = "windows")]
+fn toggle_single_instance_win() -> bool {
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+    use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW, WM_CLOSE};
+
+    let mutex_name = encode_wide("Local\\Keysor_Single_Instance_Mutex");
+    unsafe {
+        let mutex = CreateMutexW(std::ptr::null(), 0, mutex_name.as_ptr());
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            println!("[Toggle] Keysor is already running. Toggling OFF (terminating existing instance)...");
+            
+            // 기존 Keysor 메인 및 HUD 창을 찾아 WM_CLOSE 전송
+            let main_class = encode_wide("KeysorMainDummyClass");
+            let main_hwnd = FindWindowW(main_class.as_ptr(), std::ptr::null());
+            if main_hwnd != 0 {
+                PostMessageW(main_hwnd, WM_CLOSE, 0, 0);
+            }
+            let hud_class = encode_wide("KeysorHUDClass");
+            let hud_hwnd = FindWindowW(hud_class.as_ptr(), std::ptr::null());
+            if hud_hwnd != 0 {
+                PostMessageW(hud_hwnd, WM_CLOSE, 0, 0);
+            }
+
+            restore_windows_system_cursor();
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            return false;
+        }
+        
+        // Mutex 핸들을 영구 보존하여 프로세스 라이프타임 동안 단일 인스턴스 유지
+        Box::leak(Box::new(mutex));
+    }
+    true
+}
+
+#[cfg(target_os = "windows")]
 pub fn restore_windows_system_cursor() {
     use windows_sys::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPIF_SENDCHANGE, SPI_SETCURSORS};
     unsafe {
@@ -120,6 +155,12 @@ fn main() {
                 run_windows_watchdog(pid);
                 return;
             }
+        }
+
+        // 1. 단일 인스턴스 토글 스위치 (이미 켜져있으면 기존 프로세스 종료 후 종료 = Toggle OFF)
+        if !toggle_single_instance_win() {
+            println!("[Keysor] Successfully toggled OFF existing Keysor instance.");
+            return;
         }
     }
 
