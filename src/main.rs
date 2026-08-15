@@ -68,7 +68,7 @@ fn run_windows_watchdog(parent_pid: u32) {
     use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, WaitForSingleObject};
 
     unsafe {
-        // 켜지자마자 이전 남아있을 수 있는 투명 커서 1차 복구 (Self-Healing)
+        // 1. 워치독 시작 즉시 이전 남아있을 수 있는 투명 커서 1차 복구 (Self-Healing)
         restore_windows_system_cursor();
 
         let h_process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION, 0, parent_pid);
@@ -76,19 +76,30 @@ fn run_windows_watchdog(parent_pid: u32) {
             // CPU 점유율 0.00% 완전 수면 상태로 부모(메인 키서) 프로세스 강제종료/사망 감시 대기
             WaitForSingleObject(h_process, 0xFFFFFFFF); // INFINITE
             windows_sys::Win32::Foundation::CloseHandle(h_process);
+        } else {
+            // 이미 부모 프로세스가 종료된 상태라면 잠시 대기
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
 
-        // 메인 키서 종료/강제종료 감지 시 0.001초 만에 마우스 커서 100% 복구
-        restore_windows_system_cursor();
+        // 2. 메인 키서 종료/강제종료(taskkill /F, 크래시 등) 감지 시 마우스 커서 100% 즉시 복구
+        for _ in 0..3 {
+            restore_windows_system_cursor();
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
     }
 }
 
 #[cfg(target_os = "windows")]
 fn spawn_watchdog_subprocess() {
     if let Ok(exe_path) = std::env::current_exe() {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x00000008;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
         let parent_pid = std::process::id();
         let _ = std::process::Command::new(exe_path)
             .args(["--watchdog", &parent_pid.to_string()])
+            .creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP)
             .spawn();
     }
 }
@@ -96,10 +107,19 @@ fn spawn_watchdog_subprocess() {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     #[cfg(target_os = "windows")]
-    if args.len() >= 3 && args[1] == "--watchdog" {
-        if let Ok(pid) = args[2].parse::<u32>() {
-            run_windows_watchdog(pid);
+    {
+        // 0. 비상 커서 복구 커맨드라인 인자 처리 (keysor --restore 또는 keysor -r)
+        if args.len() >= 2 && (args[1] == "--restore" || args[1] == "--restore-cursor" || args[1] == "-r") {
+            restore_windows_system_cursor();
+            println!("[Keysor] Windows system cursor restored successfully.");
             return;
+        }
+
+        if args.len() >= 3 && args[1] == "--watchdog" {
+            if let Ok(pid) = args[2].parse::<u32>() {
+                run_windows_watchdog(pid);
+                return;
+            }
         }
     }
 
@@ -108,7 +128,7 @@ fn main() {
         // 1. 키서 구동 즉시 커서 0.1초 원복 (Self-Healing)
         restore_windows_system_cursor();
 
-        // 2. 튕김/파닉 크래시 예외 핸들러 등록 (비상 에어백)
+        // 2. 튕김/패닉 크래시 예외 핸들러 등록 (비상 에어백)
         let default_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |panic_info| {
             restore_windows_system_cursor();
@@ -123,7 +143,7 @@ fn main() {
             windows_sys::Win32::System::Diagnostics::Debug::SetUnhandledExceptionFilter(Some(win32_crash_exception_filter));
         }
 
-        // 3. 커널 강제종료(taskkill /F) 감지 워치독 보조 프로세스 가동 (CPU 0.00%, RAM < 1MB)
+        // 3. 커널 강제종료(taskkill /F) 감지 독립 워치독 보조 프로세스 가동 (CPU 0.00%, RAM < 1MB)
         spawn_watchdog_subprocess();
     }
     #[cfg(target_os = "macos")]

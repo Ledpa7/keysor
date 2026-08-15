@@ -151,40 +151,41 @@ impl SystemController for WindowsSystemController {
 
     fn register_startup(&self, active: bool) -> Result<(), String> {
         let shortcut_path = get_startup_shortcut_path();
-        if active {
-            if let Ok(exe_path) = std::env::current_exe() {
-                let exe_path_str = exe_path.to_string_lossy();
-                let exe_dir = exe_path.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-                let shortcut_path_str = shortcut_path.to_string_lossy();
-                
-                let script = format!(
-                    "$WshShell = New-Object -ComObject WScript.Shell; \
-                     $Shortcut = $WshShell.CreateShortcut('{}'); \
-                     $Shortcut.TargetPath = '{}'; \
-                     $Shortcut.WorkingDirectory = '{}'; \
-                     $Shortcut.Save()",
-                    shortcut_path_str, exe_path_str, exe_dir
-                );
-                
-                let output = std::process::Command::new("powershell")
-                    .args(&["-NoProfile", "-Command", &script])
-                    .output();
-                    
-                match output {
-                    Ok(out) if out.status.success() => Ok(()),
-                    Ok(out) => Err(String::from_utf8_lossy(&out.stderr).into_owned()),
-                    Err(e) => Err(e.to_string()),
+
+        // 1. Windows 레지스트리 (HKCU\Software\Microsoft\Windows\CurrentVersion\Run) 즉각 등록/해제
+        #[cfg(target_os = "windows")]
+        unsafe {
+            use windows_sys::Win32::System::Registry::*;
+            let subkey = crate::ui::win_gdi::encode_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+            let mut key: HKEY = 0;
+            if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_SET_VALUE | KEY_QUERY_VALUE, &mut key) == 0 && key != 0 {
+                let val_name = crate::ui::win_gdi::encode_wide("Keysor");
+                if active {
+                    if let Ok(exe_path) = std::env::current_exe() {
+                        let path_str = format!("\"{}\"", exe_path.to_string_lossy());
+                        let val = crate::ui::win_gdi::encode_wide(&path_str);
+                        RegSetValueExW(
+                            key,
+                            val_name.as_ptr(),
+                            0,
+                            REG_SZ,
+                            val.as_ptr() as *const u8,
+                            (val.len() * 2) as u32,
+                        );
+                    }
+                } else {
+                    RegDeleteValueW(key, val_name.as_ptr());
                 }
-            } else {
-                Err("Cannot retrieve current executable path".to_string())
-            }
-        } else {
-            if shortcut_path.exists() {
-                std::fs::remove_file(&shortcut_path).map_err(|e| e.to_string())
-            } else {
-                Ok(())
+                RegCloseKey(key);
             }
         }
+
+        // 2. 시작 프로그램 폴더 바로가기 동기화/정리
+        if !active && shortcut_path.exists() {
+            let _ = std::fs::remove_file(&shortcut_path);
+        }
+
+        Ok(())
     }
 
     fn simulate_browser_navigation(&self, forward: bool) {

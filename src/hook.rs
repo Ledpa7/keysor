@@ -67,6 +67,7 @@ pub struct AppState {
     pub alt_pressed: bool,
     pub win_pressed: bool,
     pub shift_pressed: bool,
+    pub last_input_time: Instant,
 }
 
 impl AppState {
@@ -301,10 +302,10 @@ fn process_mouse_scrolling(
         if elapsed >= 0.050 {
             let scroll_elapsed = elapsed - 0.050;
             
-            let base_scroll = 2160.0; // 초당 18 notches (2160 delta/sec)
-            let max_scroll = 21600.0; // 초당 180 notches (21600 delta/sec)
-            let accel_factor = 6.0;
-            let speed = (base_scroll + scroll_elapsed * accel_factor * 1800.0).min(max_scroll);
+            let base_scroll = 840.0; // 초당 7 notches (840 delta/sec, 약 21줄/초로 차분하게 시작)
+            let max_scroll = 7200.0; // 초당 60 notches (7200 delta/sec, 최대 180줄/초)
+            let accel_factor = 4.0;
+            let speed = (base_scroll + scroll_elapsed * accel_factor * 800.0).min(max_scroll);
             
             let scroll_amount_y = speed * params.sdy * dt + *remainder_scroll_y;
             let scroll_amount_x = speed * params.sdx * dt + *remainder_scroll_x;
@@ -381,6 +382,24 @@ fn start_movement_thread(state_ptr: Arc<Mutex<AppState>>) {
                 crate::indicator::check_magnetic_snapping();
                 crate::indicator::check_global_magnetic_snapping(is_moving);
 
+                // 안전장치: 마우스 모드 진입 후 30초 동안 아무 키 입력이 없으면 커서 안전 자동 원복
+                let should_timeout = {
+                    if let Ok(state) = state_ptr.try_lock() {
+                        state.last_input_time.elapsed() >= Duration::from_secs(30)
+                    } else {
+                        false
+                    }
+                };
+                if should_timeout {
+                    if let Ok(mut state) = state_ptr.try_lock() {
+                        println!("[Safety] 30s inactivity in mouse mode. Auto-restoring system cursor.");
+                        state.deactivate_mouse_mode();
+                        #[cfg(windows)]
+                        crate::ui::win_gdi::force_restore_system_cursor();
+                        crate::indicator::hide_indicator();
+                    }
+                }
+
                 was_mouse_mode = true;
             } else if was_mouse_mode {
                 #[cfg(windows)]
@@ -444,19 +463,19 @@ fn execute_pending_action(action: PendingMouseAction) {
             crate::indicator::FORCE_UIA_REFRESH.store(true, std::sync::atomic::Ordering::SeqCst);
         }
         PendingMouseAction::ScrollUp => {
-            get_system_controller().scroll(120);
+            get_system_controller().scroll(60);
             crate::indicator::trigger_click_motion(crate::indicator::ClickType::Scroll);
         }
         PendingMouseAction::ScrollDown => {
-            get_system_controller().scroll(-120);
+            get_system_controller().scroll(-60);
             crate::indicator::trigger_click_motion(crate::indicator::ClickType::Scroll);
         }
         PendingMouseAction::ScrollLeft => {
-            get_system_controller().scroll_horizontal(-120);
+            get_system_controller().scroll_horizontal(-60);
             crate::indicator::trigger_click_motion(crate::indicator::ClickType::Scroll);
         }
         PendingMouseAction::ScrollRight => {
-            get_system_controller().scroll_horizontal(120);
+            get_system_controller().scroll_horizontal(60);
             crate::indicator::trigger_click_motion(crate::indicator::ClickType::Scroll);
         }
         PendingMouseAction::BrowserBack => get_system_controller().simulate_browser_navigation(false),
@@ -814,8 +833,25 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
     if let Some(state_arc) = APP_STATE.get() {
         let is_modifier_key = {
             let mut state = state_arc.lock().unwrap();
+            if event.is_keydown {
+                state.last_input_time = Instant::now();
+            }
             state.update_modifier_key_state(event.vk_code, event.is_keydown)
         };
+
+        // 0. 비상 커서 복구 핫키 (Emergency Hotkey): Ctrl + Shift + Alt + Esc 또는 Ctrl + Shift + Alt + C
+        if event.is_keydown && (event.vk_code == 0x1B || event.vk_code == 0x43) {
+            if let Ok(mut state) = state_arc.try_lock() {
+                if state.ctrl_pressed && state.alt_pressed && state.shift_pressed {
+                    println!("[Emergency] Emergency cursor restore hotkey triggered.");
+                    state.deactivate_mouse_mode();
+                    #[cfg(windows)]
+                    crate::ui::win_gdi::force_restore_system_cursor();
+                    crate::indicator::hide_indicator();
+                    return HookResult::Pass;
+                }
+            }
+        }
 
         // Win+Tab, Alt+Tab 단축키 시작 감지 및 강제 커서 복원
         if event.vk_code == 0x09 && event.is_keydown {
@@ -982,6 +1018,7 @@ pub fn start_hook(config: Config, is_pro: bool, is_trial: bool) {
         alt_pressed,
         win_pressed,
         shift_pressed,
+        last_input_time: Instant::now(),
     }));
 
     APP_STATE.set(Arc::clone(&state)).ok();

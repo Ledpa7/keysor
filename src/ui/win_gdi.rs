@@ -10,7 +10,7 @@ use windows_sys::Win32::Graphics::Gdi::{
     CreateFontW, GetDC, ReleaseDC, CreateCompatibleDC, CreateDIBSection, DeleteDC,
     BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, AC_SRC_OVER, AC_SRC_ALPHA,
     CreateCompatibleBitmap, BitBlt, SRCCOPY, SetMapMode, SetWindowExtEx, SetViewportExtEx,
-    MM_ANISOTROPIC, MM_TEXT
+    MM_ANISOTROPIC, MM_TEXT, Ellipse
 };
 use windows_sys::Win32::Graphics::GdiPlus::{
     GdiplusStartup, GdiplusStartupInput,
@@ -18,7 +18,9 @@ use windows_sys::Win32::Graphics::GdiPlus::{
     GdipCreatePen1, GdipDeletePen, GdipDrawLineI, SmoothingModeAntiAlias,
     GdipSetPenStartCap, GdipSetPenEndCap, GdipSetPenLineJoin,
     GdipCreateLineBrush, GdipCreatePen2, GdipDeleteBrush, PointF,
-    GdipScaleWorldTransform
+    GdipScaleWorldTransform, GdipCreateSolidFill, GdipFillEllipse, GdipDrawEllipse,
+    GdipCreatePath, GdipDeletePath, GdipAddPathArc, GdipClosePathFigure,
+    GdipFillPath, GdipDrawPath
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     RegisterClassW, CreateWindowExW, DefWindowProcW, ShowWindow, SetWindowPos, MSG,
@@ -96,7 +98,7 @@ pub static CLICK_TYPE: OnceLock<Mutex<ClickType>> = OnceLock::new();
 
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
-fn encode_wide(s: &str) -> Vec<u16> {
+pub fn encode_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
@@ -846,34 +848,40 @@ fn draw_key_cap(
 
         SetTextColor(hdc, if category > 0 { border_color } else { 0x888888 });
         let key_w = encode_wide(key_text);
-        let mut r_key = RECT { left: x, top: y + 4, right: x + w, bottom: y + 21 };
-        DrawTextW(hdc, key_w.as_ptr(), key_w.len() as i32 - 1, &mut r_key, 1 | 32);
-
-        // 영문 텍스트가 좁은 키캡(w <= 45)에서 짤리는 것을 방지하기 위해 동적으로 작은 폰트 적용
-        let desc_font = if w <= 45 && desc_text.len() > 4 {
-            let font_name = encode_wide("Segoe UI");
-            CreateFontW(11, 0, 0, 0, 500, 0, 0, 0, 1, 0, 0, 5, 0, font_name.as_ptr())
+        if desc_text.is_empty() {
+            let mut r_key = RECT { left: x, top: y, right: x + w, bottom: y + h };
+            DrawTextW(hdc, key_w.as_ptr(), key_w.len() as i32 - 1, &mut r_key, 1 | 4 | 32); // DT_CENTER | DT_VCENTER | DT_SINGLELINE
         } else {
-            0
-        };
+            let mut r_key = RECT { left: x, top: y + 4, right: x + w, bottom: y + 21 };
+            DrawTextW(hdc, key_w.as_ptr(), key_w.len() as i32 - 1, &mut r_key, 1 | 32);
 
-        let old_desc_font = if desc_font != 0 {
-            SelectObject(hdc, desc_font)
-        } else {
-            0
-        };
+            // 영문 텍스트가 좁은 키캡(w <= 45)에서 짤리는 것을 방지하기 위해 동적으로 작은 폰트 적용
+            let desc_font = if w <= 45 && desc_text.len() > 4 {
+                let font_name = encode_wide("Segoe UI");
+                CreateFontW(11, 0, 0, 0, 500, 0, 0, 0, 1, 0, 0, 5, 0, font_name.as_ptr())
+            } else {
+                0
+            };
 
-        SetTextColor(hdc, if category > 0 { 0xFFFFFF } else { 0x555555 });
-        let desc_w = encode_wide(desc_text);
-        let top_offset = if category == 6 { 18 } else { 23 }; // Shift(6)는 2줄 설명이므로 5px 위로 올림
-        let bottom_offset = if category == 6 { 2 } else { 4 };
-        let mut r_desc = RECT { left: x + 2, top: y + top_offset, right: x + w - 2, bottom: y + h - bottom_offset };
-        let align = if desc_text.contains('\n') { 1 } else { 1 | 32 }; // DT_CENTER vs DT_CENTER | DT_SINGLELINE
-        DrawTextW(hdc, desc_w.as_ptr(), desc_w.len() as i32 - 1, &mut r_desc, align);
+            let old_desc_font = if desc_font != 0 {
+                SelectObject(hdc, desc_font)
+            } else {
+                0
+            };
 
-        if desc_font != 0 {
-            SelectObject(hdc, old_desc_font);
-            DeleteObject(desc_font);
+            SetTextColor(hdc, if category > 0 { 0xFFFFFF } else { 0x555555 });
+            let desc_w = encode_wide(desc_text);
+            let is_multiline = desc_text.contains('\n');
+            let top_offset = if is_multiline { 18 } else { 23 }; // 2줄 설명(Shift 등)만 18, 1줄 설명(J, K, WASD 등)은 23으로 완벽 통일
+            let bottom_offset = if is_multiline { 2 } else { 4 };
+            let mut r_desc = RECT { left: x + 2, top: y + top_offset, right: x + w - 2, bottom: y + h - bottom_offset };
+            let align = if is_multiline { 1 } else { 1 | 32 };
+            DrawTextW(hdc, desc_w.as_ptr(), desc_w.len() as i32 - 1, &mut r_desc, align);
+
+            if desc_font != 0 {
+                SelectObject(hdc, old_desc_font);
+                DeleteObject(desc_font);
+            }
         }
 
         SelectObject(hdc, old_font);
@@ -944,6 +952,19 @@ unsafe extern "system" fn main_wnd_proc(
                 crate::hook::cleanup_hook();
                 force_restore_system_cursor();
                 std::process::exit(0);
+            }
+            0x0011 | 0x0016 => { // WM_QUERYENDSESSION | WM_ENDSESSION (Windows Shutdown / Restart)
+                crate::hook::cleanup_hook();
+                force_restore_system_cursor();
+                1
+            }
+            0x02B1 => { // WM_WTSSESSION_CHANGE (Session Lock / Unlock / Logoff)
+                force_restore_system_cursor();
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            0x007E | 0x0218 => { // WM_DISPLAYCHANGE | WM_POWERBROADCAST (Display resolution change / Sleep)
+                force_restore_system_cursor();
+                DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             _ => {
                 if msg == windows_sys::Win32::UI::WindowsAndMessaging::WM_SHOWWINDOW {
@@ -1302,11 +1323,14 @@ fn check_autostart_status_win() -> bool {
                 let mut cb_data: u32 = 0;
                 let query_res = RegQueryValueExW(key, val_name.as_ptr(), std::ptr::null_mut(), &mut type_reg, std::ptr::null_mut(), &mut cb_data);
                 RegCloseKey(key);
-                return query_res == 0;
+                if query_res == 0 && cb_data > 0 {
+                    return true;
+                }
             }
         }
     }
-    false
+    let shortcut_path = get_startup_shortcut_path();
+    shortcut_path.exists()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1357,7 +1381,7 @@ fn classify_hit_target(x: i16, y: i16, features_enabled: bool, is_pro: bool) -> 
             return HudHitTarget::Minimize;
         }
     }
-    if y >= 30 && y <= 50 {
+    if y >= 30 && y <= 54 {
         if x >= 662 && x <= 712 {
             return HudHitTarget::ToggleLanguage;
         } else if x >= 430 && x <= 540 {
@@ -1513,6 +1537,188 @@ unsafe fn draw_hud_button(
         }
         
         SelectObject(hdc, old_font);
+    }
+}
+
+unsafe fn draw_hud_toggle_row(
+    hdc: windows_sys::Win32::Graphics::Gdi::HDC,
+    x1: i32,
+    y1: i32,
+    x2: i32,
+    y2: i32,
+    radius: i32,
+    is_active: bool,
+    is_hovered: bool,
+    is_enabled: bool,
+    label: &str,
+    font: windows_sys::Win32::Graphics::Gdi::HFONT,
+) {
+    unsafe {
+        if !is_enabled {
+            let brush = CreateSolidBrush(0x121414);
+            let old_brush = SelectObject(hdc, brush);
+            let pen = CreatePen(0, 1, 0x222222);
+            let old_pen = SelectObject(hdc, pen);
+            RoundRect(hdc, x1, y1, x2, y2, radius, radius);
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+            SelectObject(hdc, old_brush);
+            DeleteObject(brush);
+            return;
+        }
+
+        // 1. 버튼 배경 컨테이너 패널
+        let bg_color = if is_hovered { 0x2A2E2E } else { 0x202424 };
+        let brush = CreateSolidBrush(bg_color);
+        let old_brush = SelectObject(hdc, brush);
+
+        let border_color = if is_hovered {
+            0xADFF2F
+        } else if is_active {
+            0x6EAA20
+        } else {
+            0x3C4040
+        };
+
+        if border_color == 0xADFF2F {
+            let dark_pen = CreatePen(0, 2, 0x004D20);
+            let old_pen = SelectObject(hdc, dark_pen);
+            RoundRect(hdc, x1 + 1, y1 + 1, x2 + 1, y2 + 1, radius, radius);
+            SelectObject(hdc, old_pen);
+            DeleteObject(dark_pen);
+
+            let neon_pen = CreatePen(0, 2, 0xADFF2F);
+            let old_pen = SelectObject(hdc, neon_pen);
+            RoundRect(hdc, x1, y1, x2, y2, radius, radius);
+            SelectObject(hdc, old_pen);
+            DeleteObject(neon_pen);
+        } else {
+            let pen = CreatePen(0, 1, border_color);
+            let old_pen = SelectObject(hdc, pen);
+            RoundRect(hdc, x1, y1, x2, y2, radius, radius);
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+        }
+
+        SelectObject(hdc, old_brush);
+        DeleteObject(brush);
+
+        // 2. 좌측 텍스트 라벨 (좌측 정렬, 수직 중앙)
+        let old_font = SelectObject(hdc, font);
+        let text_color = if is_active {
+            0xADFF2F
+        } else if is_hovered {
+            0xFFFFFF
+        } else {
+            0xCCCCCC
+        };
+
+        let wide_text = encode_wide(label);
+        if text_color == 0xADFF2F {
+            SetTextColor(hdc, 0x004D20);
+            let mut r_dark = RECT {
+                left: x1 + 10,
+                top: y1 + 1,
+                right: x2 - 44,
+                bottom: y2 + 1,
+            };
+            DrawTextW(hdc, wide_text.as_ptr(), wide_text.len() as i32 - 1, &mut r_dark, 0 | 4 | 32);
+
+            SetTextColor(hdc, 0xADFF2F);
+            let mut r_neon = RECT {
+                left: x1 + 10,
+                top: y1,
+                right: x2 - 44,
+                bottom: y2,
+            };
+            DrawTextW(hdc, wide_text.as_ptr(), wide_text.len() as i32 - 1, &mut r_neon, 0 | 4 | 32);
+        } else {
+            SetTextColor(hdc, text_color);
+            let mut r_text = RECT {
+                left: x1 + 10,
+                top: y1,
+                right: x2 - 44,
+                bottom: y2,
+            };
+            DrawTextW(hdc, wide_text.as_ptr(), wide_text.len() as i32 - 1, &mut r_text, 0 | 4 | 32);
+        }
+        SelectObject(hdc, old_font);
+
+        // 3. 우측 고해상도 안티앨리어싱(GDI+) 토글 스위치 렌더링
+        let mut graphics = std::ptr::null_mut();
+        if GdipCreateFromHDC(hdc, &mut graphics) == 0 {
+            GdipSetSmoothingMode(graphics, SmoothingModeAntiAlias);
+
+            let sw_w: f32 = 32.0;
+            let sw_h: f32 = 18.0;
+            let sw_x: f32 = (x2 as f32) - sw_w - 7.0;
+            let sw_y: f32 = (y1 as f32) + ((y2 - y1) as f32 - sw_h) / 2.0;
+
+            let mut path = std::ptr::null_mut();
+            if GdipCreatePath(0, &mut path) == 0 {
+                let d = sw_h;
+                // 왼쪽 반원 (90도부터 180도)
+                GdipAddPathArc(path, sw_x, sw_y, d, d, 90.0, 180.0);
+                // 오른쪽 반원 (270도부터 180도)
+                GdipAddPathArc(path, sw_x + sw_w - d, sw_y, d, d, 270.0, 180.0);
+                GdipClosePathFigure(path);
+
+                // 트랙 배경 채우기
+                let track_argb: u32 = if is_active {
+                    0xFF2FFFAD // 네온 라임/그린
+                } else {
+                    0xFF32363A // 세련된 다크 트랙
+                };
+                let mut track_brush = std::ptr::null_mut();
+                if GdipCreateSolidFill(track_argb, &mut track_brush) == 0 {
+                    GdipFillPath(graphics, track_brush, path);
+                    GdipDeleteBrush(track_brush);
+                }
+
+                // OFF 상태일 때 부드러운 외곽선 추가
+                if !is_active {
+                    let mut track_pen = std::ptr::null_mut();
+                    if GdipCreatePen1(0xFF4C5258, 1.0, 0, &mut track_pen) == 0 {
+                        GdipDrawPath(graphics, track_pen, path);
+                        GdipDeletePen(track_pen);
+                    }
+                }
+
+                GdipDeletePath(path);
+            }
+
+            // 4. 슬라이딩 원형 노브 (Knob)
+            let knob_d: f32 = sw_h - 4.0; // 14.0px
+            let knob_x: f32 = if is_active {
+                sw_x + sw_w - knob_d - 2.0
+            } else {
+                sw_x + 2.0
+            };
+            let knob_y: f32 = sw_y + 2.0;
+
+            // 노브 부드러운 드롭 섀도우
+            let mut shadow_brush = std::ptr::null_mut();
+            if GdipCreateSolidFill(0x38000000, &mut shadow_brush) == 0 {
+                GdipFillEllipse(graphics, shadow_brush, knob_x, knob_y + 0.8, knob_d, knob_d);
+                GdipDeleteBrush(shadow_brush);
+            }
+
+            // 노브 본체 (순백색)
+            let mut knob_brush = std::ptr::null_mut();
+            if GdipCreateSolidFill(0xFFFFFFFF, &mut knob_brush) == 0 {
+                GdipFillEllipse(graphics, knob_brush, knob_x, knob_y, knob_d, knob_d);
+                GdipDeleteBrush(knob_brush);
+            }
+
+            // 노브 섬세한 테두리
+            let mut knob_pen = std::ptr::null_mut();
+            if GdipCreatePen1(0x20000000, 0.8, 0, &mut knob_pen) == 0 {
+                GdipDrawEllipse(graphics, knob_pen, knob_x, knob_y, knob_d, knob_d);
+                GdipDeletePen(knob_pen);
+            }
+
+            GdipDeleteGraphics(graphics);
+        }
     }
 }
 
@@ -1886,65 +2092,28 @@ unsafe extern "system" fn hud_wnd_proc(
                 };
                 draw_hud_button(hdc, 713, 154, 768, 186, 5, inc_bg, inc_border, inc_text_color, "+", fonts.title, 37, -4);
 
-                // 1. Draw Grid Mode Button
+                let features_enabled = is_pro || is_trial;
+
+                // 1. Draw Grid Mode Toggle Button
                 let pm_enabled = {
                     let state_arc = crate::hook::APP_STATE.get();
                     state_arc.map_or(false, |arc| arc.lock().unwrap().config.settings.pixel_mode.unwrap_or(false))
                 };
-                let (pm_bg, pm_border, pm_text_color) = if !(is_pro || is_trial) {
-                    (0x121414, 0x222222, 0x333333)
-                } else if pm_enabled {
-                    if hover_val == 5 { (0xBCFF7A, 0xADFF2F, 0x000000) } else { (0xADFF2F, 0x3C4040, 0x000000) }
-                } else {
-                    if hover_val == 5 { (0x3C4040, 0xADFF2F, 0xFFFFFF) } else { (0x202424, 0x3C4040, 0x888888) }
-                };
-                let pm_label_str = if !(is_pro || is_trial) {
-                    ""
-                } else if lang_en {
-                    if pm_enabled { "Grid Mode: ON" } else { "Grid Mode: OFF" }
-                } else {
-                    if pm_enabled { "그리드 모드: ON" } else { "그리드 모드: OFF" }
-                };
-                draw_hud_button(hdc, 648, 191, 768, 223, 5, pm_bg, pm_border, pm_text_color, pm_label_str, fonts.key, 37, 0);
+                let pm_label_str = if lang_en { "Grid Mode" } else { "그리드 모드" };
+                draw_hud_toggle_row(hdc, 648, 191, 768, 223, 5, pm_enabled, hover_val == 5, features_enabled, pm_label_str, fonts.key);
 
-                // 2. Draw Magnet Mode Button
+                // 2. Draw Magnet Mode Toggle Button
                 let magnet_enabled = {
                     let state_arc = crate::hook::APP_STATE.get();
                     state_arc.map_or(false, |arc| arc.lock().unwrap().config.settings.magnetic_mode.unwrap_or(false))
                 };
-                let (mag_bg, mag_border, mag_text_color) = if !(is_pro || is_trial) {
-                    (0x121414, 0x222222, 0x333333)
-                } else if magnet_enabled {
-                    if hover_val == 7 { (0xBCFF7A, 0xADFF2F, 0x000000) } else { (0xADFF2F, 0x3C4040, 0x000000) }
-                } else {
-                    if hover_val == 7 { (0x3C4040, 0xADFF2F, 0xFFFFFF) } else { (0x202424, 0x3C4040, 0x888888) }
-                };
-                let mag_label_str = if !(is_pro || is_trial) {
-                    ""
-                } else if lang_en {
-                    if magnet_enabled { "Magnet Mode: ON" } else { "Magnet Mode: OFF" }
-                } else {
-                    if magnet_enabled { "자석 모드: ON" } else { "자석 모드: OFF" }
-                };
-                draw_hud_button(hdc, 648, 228, 768, 260, 5, mag_bg, mag_border, mag_text_color, mag_label_str, fonts.key, 37, 0);
+                let mag_label_str = if lang_en { "Magnet Mode" } else { "자석 모드" };
+                draw_hud_toggle_row(hdc, 648, 228, 768, 260, 5, magnet_enabled, hover_val == 7, features_enabled, mag_label_str, fonts.key);
 
                 // 3. Draw Auto-Start Toggle Button
                 let autostart_enabled = check_autostart_status_win();
-                let (auto_bg, auto_border, auto_text_color) = if !(is_pro || is_trial) {
-                    (0x121414, 0x222222, 0x333333)
-                } else if autostart_enabled {
-                    if hover_val == 9 { (0xBCFF7A, 0xADFF2F, 0x000000) } else { (0xADFF2F, 0x3C4040, 0x000000) }
-                } else {
-                    if hover_val == 9 { (0x3C4040, 0xADFF2F, 0xFFFFFF) } else { (0x202424, 0x3C4040, 0x888888) }
-                };
-                let auto_label_str = if !(is_pro || is_trial) {
-                    ""
-                } else if lang_en {
-                    if autostart_enabled { "Auto-Start: ON" } else { "Auto-Start: OFF" }
-                } else {
-                    if autostart_enabled { "자동 실행: ON" } else { "자동 실행: OFF" }
-                };
-                draw_hud_button(hdc, 648, 265, 768, 297, 5, auto_bg, auto_border, auto_text_color, auto_label_str, fonts.key, 37, 0);
+                let auto_label_str = if lang_en { "Auto-Start" } else { "자동 실행" };
+                draw_hud_toggle_row(hdc, 648, 265, 768, 297, 5, autostart_enabled, hover_val == 9, features_enabled, auto_label_str, fonts.key);
 
                 // 4. Draw Details Toggle Button
                 let sens_info_enabled = SHOW_ALL_SENS.load(Ordering::SeqCst);

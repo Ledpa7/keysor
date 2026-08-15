@@ -223,14 +223,17 @@ pub fn check_magnetic_snapping() {
             let scale = crate::platform::get_system_controller().get_dpi_scale();
             
             let targets = [
-                (1, 687, 40),
-                (2, 754, 20),
-                (3, 785, 20),
-                (4, 678, 186),
-                (5, 738, 186),
-                (6, 708, 226),
-                (7, 708, 266),
-                (8, 708, 306),
+                (1, 687, 42),  // Lang Toggle (KR/EN)
+                (2, 754, 20),  // Minimize (-)
+                (3, 785, 20),  // Close (X)
+                (4, 485, 42),  // Buy Pro
+                (5, 601, 42),  // License Info
+                (6, 676, 170), // [-] Speed Dec
+                (7, 741, 170), // [+] Speed Inc
+                (8, 708, 207), // Grid Mode Row
+                (9, 708, 244), // Magnet Mode Row
+                (10, 708, 281), // Auto-Start Row
+                (11, 708, 318), // Details Row
             ];
             
             static HUD_LANDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
