@@ -53,6 +53,7 @@ pub struct AppState {
     // 스페이스바 조작 제어용 상태
     pub space_press_time: Option<Instant>,
     pub is_space_down: bool,
+    pub is_right_down: bool,
     pub is_dragging: bool,
     pub space_tap_count: u32,
     pub space_last_tap_time: Option<Instant>,
@@ -168,6 +169,8 @@ impl AppState {
     /// 마우스 조작 모드를 비활성화하고 관련된 모든 상태(이동, 스크롤, 드래그)를 초기화합니다.
     pub fn deactivate_mouse_mode(&mut self) {
         self.is_mouse_mode = false;
+        self.is_space_down = false;
+        self.is_right_down = false;
         self.active_movement_keys.clear();
         self.movement_start_time = None;
         self.active_scroll_keys.clear();
@@ -764,7 +767,10 @@ fn process_movement_and_actions(
             } else {
                 match action.as_str() {
                     "MouseLeftClick" => pending_action = PendingMouseAction::LeftClick,
-                    "MouseRightClick" => pending_action = PendingMouseAction::RightClick,
+                    "MouseRightClick" => {
+                        state.is_right_down = true;
+                        pending_action = PendingMouseAction::RightClick;
+                    }
                     other => {
                         if other.starts_with("RunApp:") {
                             if state.is_pro || state.is_trial {
@@ -786,6 +792,8 @@ fn process_movement_and_actions(
                 if state.active_scroll_keys.is_empty() {
                     state.scroll_start_time = None;
                 }
+            } else if action == "MouseRightClick" {
+                state.is_right_down = false;
             }
         }
         (HookResult::Block, pending_action)
@@ -1007,6 +1015,7 @@ pub fn start_hook(config: Config, is_pro: bool, is_trial: bool) {
         caps_lock_used_as_modifier: false,
         space_press_time: None,
         is_space_down: false,
+        is_right_down: false,
         is_dragging: false,
         space_tap_count: 0,
         space_last_tap_time: None,

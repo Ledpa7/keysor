@@ -2992,10 +2992,13 @@ fn update_click_scale() -> bool {
         if let Ok(state) = state_arc.try_lock() {
             let space_held = state.is_space_down || state.is_dragging;
             let scroll_held = !state.active_scroll_keys.is_empty();
+            let right_held = state.is_right_down;
             if space_held {
                 (true, ClickType::Left)
             } else if scroll_held {
                 (true, ClickType::Scroll)
+            } else if right_held {
+                (true, ClickType::Right)
             } else {
                 (false, ClickType::None)
             }
@@ -3069,12 +3072,12 @@ fn calculate_interpolated_pos() -> (f64, f64) {
     (next_x, next_y)
 }
 
-fn check_state_changed(is_space_down: bool, is_dragging: bool, is_scrolling: bool, is_snapped: bool) -> bool {
-    static LAST_INDICATOR_STATE: OnceLock<Mutex<(bool, bool, bool, bool)>> = OnceLock::new();
-    let last_state_lock = LAST_INDICATOR_STATE.get_or_init(|| Mutex::new((false, false, false, false)));
+fn check_state_changed(is_space_down: bool, is_right_down: bool, is_dragging: bool, is_scrolling: bool, is_snapped: bool) -> bool {
+    static LAST_INDICATOR_STATE: OnceLock<Mutex<(bool, bool, bool, bool, bool)>> = OnceLock::new();
+    let last_state_lock = LAST_INDICATOR_STATE.get_or_init(|| Mutex::new((false, false, false, false, false)));
     if let Ok(mut last_state) = last_state_lock.lock() {
-        if *last_state != (is_space_down, is_dragging, is_scrolling, is_snapped) {
-            *last_state = (is_space_down, is_dragging, is_scrolling, is_snapped);
+        if *last_state != (is_space_down, is_right_down, is_dragging, is_scrolling, is_snapped) {
+            *last_state = (is_space_down, is_right_down, is_dragging, is_scrolling, is_snapped);
             true
         } else {
             false
@@ -3152,12 +3155,12 @@ fn resolve_foreground_suspend_state(fore_hwnd: HWND, is_shortcut_active: bool) -
 fn update_overlay_window_position(hwnd: HWND, scale_changed_in_loop: bool) {
     let (next_x, next_y) = calculate_interpolated_pos();
 
-    let (is_space_down, is_dragging, is_scrolling, is_snapped) = if let Some(state_arc) = crate::hook::APP_STATE.get() {
+    let (is_space_down, is_right_down, is_dragging, is_scrolling, is_snapped) = if let Some(state_arc) = crate::hook::APP_STATE.get() {
         state_arc.try_lock().map(|s| {
-            (s.is_space_down, s.is_dragging, !s.active_scroll_keys.is_empty(), is_currently_snapped())
-        }).unwrap_or((false, false, false, false))
+            (s.is_space_down, s.is_right_down, s.is_dragging, !s.active_scroll_keys.is_empty(), is_currently_snapped())
+        }).unwrap_or((false, false, false, false, false))
     } else {
-        (false, false, false, false)
+        (false, false, false, false, false)
     };
 
     static LAST_DPI_SCALE: OnceLock<Mutex<f64>> = OnceLock::new();
@@ -3176,7 +3179,7 @@ fn update_overlay_window_position(hwnd: HWND, scale_changed_in_loop: bool) {
         }
     };
 
-    let state_changed = check_state_changed(is_space_down, is_dragging, is_scrolling, is_snapped);
+    let state_changed = check_state_changed(is_space_down, is_right_down, is_dragging, is_scrolling, is_snapped);
     if state_changed || scale_changed_in_loop || dpi_changed {
         unsafe { update_indicator_layered_image(hwnd) };
     }
