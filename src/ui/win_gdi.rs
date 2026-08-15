@@ -1004,7 +1004,7 @@ unsafe extern "system" fn indicator_wnd_proc(
 pub fn trigger_click_motion(click_type: ClickType) {
     let scale_lock = CLICK_SCALE.get_or_init(|| Mutex::new(1.0));
     if let Ok(mut scale) = scale_lock.lock() {
-        *scale = 0.5; // 작아짐
+        *scale = 0.7; // 작아짐 (0.7)
     }
     let type_lock = CLICK_TYPE.get_or_init(|| Mutex::new(ClickType::None));
     if let Ok(mut t) = type_lock.lock() {
@@ -3010,9 +3010,9 @@ fn update_click_scale() -> bool {
     let mut scale_changed = false;
     if let Ok(mut scale) = scale_lock.lock() {
         if is_holding_action {
-            // 스페이스바(드래그) 또는 스크롤 키를 누르고 있는 동안에는 작은 상태(0.5)로 고정 유지
-            if *scale != 0.5 {
-                *scale = 0.5;
+            // 스페이스바(드래그) 또는 스크롤 키를 누르고 있는 동안에는 작은 상태(0.7)로 고정 유지
+            if *scale != 0.7 {
+                *scale = 0.7;
                 scale_changed = true;
             }
             let type_lock = CLICK_TYPE.get_or_init(|| Mutex::new(ClickType::None));
