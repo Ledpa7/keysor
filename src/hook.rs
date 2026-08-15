@@ -381,19 +381,6 @@ fn start_movement_thread(state_ptr: Arc<Mutex<AppState>>) {
                 crate::indicator::check_magnetic_snapping();
                 crate::indicator::check_global_magnetic_snapping(is_moving);
 
-                // 누르고 있는 동안 커서 인디케이터 색상 실시간 유지
-                let current_click_type = {
-                    let s = state_ptr.lock().unwrap();
-                    if !s.active_scroll_keys.is_empty() {
-                        crate::indicator::ClickType::Scroll
-                    } else if s.is_space_down || s.is_dragging {
-                        crate::indicator::ClickType::Left
-                    } else {
-                        crate::indicator::ClickType::None
-                    }
-                };
-                crate::indicator::trigger_click_motion(current_click_type);
-
                 was_mouse_mode = true;
             } else if was_mouse_mode {
                 #[cfg(windows)]

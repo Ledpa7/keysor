@@ -1293,10 +1293,10 @@ fn check_autostart_status_win() -> bool {
     {
         use windows_sys::Win32::System::Registry::*;
         unsafe {
-            let mut key: HKEY = std::ptr::null_mut();
+            let mut key: HKEY = 0;
             let subkey = encode_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
             let res = RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut key);
-            if res == 0 && !key.is_null() {
+            if res == 0 && key != 0 {
                 let val_name = encode_wide("Keysor");
                 let mut type_reg: u32 = 0;
                 let mut cb_data: u32 = 0;
@@ -1331,18 +1331,20 @@ enum HudHitTarget {
 
 fn classify_hit_target(x: i16, y: i16, features_enabled: bool, is_pro: bool) -> HudHitTarget {
     if !features_enabled {
-        if y >= 80 && y <= 374 && x >= 634 && x <= 782 {
+        if y >= 80 && y <= 344 && x >= 638 && x <= 778 {
             return HudHitTarget::ToggleMagnet;
         }
     }
 
     if SHOW_ALL_SENS.load(Ordering::SeqCst) && features_enabled {
-        if x >= 648 && x <= 772 {
-            if y >= 114 && y <= 132 {
-                return HudHitTarget::EditBaseSpeed;
-            } else if y >= 132 && y <= 150 {
-                return HudHitTarget::EditMaxSpeed;
-            } else if y >= 150 && y <= 168 {
+        if y >= 114 && y <= 150 {
+            if y >= 118 && y <= 133 {
+                if x >= 646 && x <= 708 {
+                    return HudHitTarget::EditBaseSpeed;
+                } else if x >= 708 && x <= 770 {
+                    return HudHitTarget::EditMaxSpeed;
+                }
+            } else if y >= 134 && y <= 150 {
                 return HudHitTarget::EditAcceleration;
             }
         }
@@ -1366,30 +1368,30 @@ fn classify_hit_target(x: i16, y: i16, features_enabled: bool, is_pro: bool) -> 
             return HudHitTarget::LicenseTop;
         }
     }
-    if y >= 170 && y <= 202 {
-        if x >= 644 && x <= 704 {
+    if y >= 154 && y <= 186 {
+        if x >= 648 && x <= 703 {
             return HudHitTarget::DecSensitivity;
-        } else if x >= 708 && x <= 768 {
+        } else if x >= 713 && x <= 768 {
             return HudHitTarget::IncSensitivity;
         }
     }
-    if y >= 210 && y <= 242 {
-        if x >= 644 && x <= 772 {
+    if y >= 191 && y <= 223 {
+        if x >= 648 && x <= 768 {
             return HudHitTarget::TogglePixelMode;
         }
     }
-    if y >= 250 && y <= 282 {
-        if x >= 644 && x <= 772 {
+    if y >= 228 && y <= 260 {
+        if x >= 648 && x <= 768 {
             return HudHitTarget::ToggleMagnet;
         }
     }
-    if y >= 290 && y <= 322 {
-        if x >= 644 && x <= 772 {
+    if y >= 265 && y <= 297 {
+        if x >= 648 && x <= 768 {
             return HudHitTarget::ToggleAutoStart;
         }
     }
-    if y >= 330 && y <= 362 {
-        if x >= 644 && x <= 772 {
+    if y >= 302 && y <= 334 {
+        if x >= 648 && x <= 768 {
             return HudHitTarget::ToggleDetail;
         }
     }
@@ -1780,15 +1782,33 @@ unsafe extern "system" fn hud_wnd_proc(
                 DeleteObject(box_brush);
 
                 let sens_title = encode_wide(speed_sens_title);
+                let old_font_title = SelectObject(hdc, fonts.title);
                 // 1. SPEED SENS 타이틀 그림자 레이어
                 SetTextColor(hdc, if features_enabled { 0x004D20 } else { 0x151515 });
-                let mut r_sens_title_dark = RECT { left: 638, top: 91, right: 778, bottom: 111 };
-                DrawTextW(hdc, sens_title.as_ptr(), sens_title.len() as i32 - 1, &mut r_sens_title_dark, 1 | 32);
+                let mut r_sens_title_dark = RECT { left: 638, top: 88, right: 778, bottom: 106 };
+                DrawTextW(hdc, sens_title.as_ptr(), sens_title.len() as i32 - 1, &mut r_sens_title_dark, 1 | 4);
 
                 // 2. SPEED SENS 타이틀 메인 레이어
                 SetTextColor(hdc, if features_enabled { 0xADFF2F } else { 0x444444 });
-                let mut r_sens_title = RECT { left: 638, top: 90, right: 778, bottom: 110 };
-                DrawTextW(hdc, sens_title.as_ptr(), sens_title.len() as i32 - 1, &mut r_sens_title, 1 | 32);
+                let mut r_sens_title = RECT { left: 638, top: 87, right: 778, bottom: 105 };
+                DrawTextW(hdc, sens_title.as_ptr(), sens_title.len() as i32 - 1, &mut r_sens_title, 1 | 4);
+                SelectObject(hdc, old_font_title);
+
+                // 3. 디스플레이 화면 전용 내부 박스 (LCD Screen: Y: 114 ~ 150, 하단 버튼과 4px 타이트 여백)
+                let disp_bg = if features_enabled { 0x090B0B } else { 0x070808 };
+                let disp_brush = CreateSolidBrush(disp_bg);
+                let old_disp_brush = SelectObject(hdc, disp_brush);
+                
+                let disp_border = if features_enabled { 0x2A3030 } else { 0x1A1C1C };
+                let disp_pen = CreatePen(0, 1, disp_border);
+                let old_disp_pen = SelectObject(hdc, disp_pen);
+                
+                RoundRect(hdc, 646, 114, 770, 150, 5, 5);
+                
+                SelectObject(hdc, old_disp_pen);
+                DeleteObject(disp_pen);
+                SelectObject(hdc, old_disp_brush);
+                DeleteObject(disp_brush);
 
                 let show_all = SHOW_ALL_SENS.load(Ordering::SeqCst);
                 if show_all {
@@ -1809,18 +1829,18 @@ unsafe extern "system" fn hud_wnd_proc(
                     };
                     
                     let old_font_txt = SelectObject(hdc, fonts.text);
-                    SetTextColor(hdc, if is_pro || is_trial { 0xFFFFFF } else { 0x333333 });
+                    SetTextColor(hdc, if is_pro || is_trial { 0xFFFFFF } else { 0x444444 });
                     
-                    let line1 = encode_wide(&format!("Base : {:.1}", base_speed));
-                    let mut r_l1 = RECT { left: 653, top: 114, right: 773, bottom: 132 };
+                    let line1 = encode_wide(&format!("Base: {:.1}", base_speed));
+                    let mut r_l1 = RECT { left: 652, top: 118, right: 708, bottom: 133 };
                     DrawTextW(hdc, line1.as_ptr(), line1.len() as i32 - 1, &mut r_l1, 0);
                     
-                    let line2 = encode_wide(&format!("Max  : {:.1}", max_speed));
-                    let mut r_l2 = RECT { left: 653, top: 132, right: 773, bottom: 150 };
+                    let line2 = encode_wide(&format!("Max: {:.1}", max_speed));
+                    let mut r_l2 = RECT { left: 708, top: 118, right: 764, bottom: 133 };
                     DrawTextW(hdc, line2.as_ptr(), line2.len() as i32 - 1, &mut r_l2, 0);
                     
                     let line3 = encode_wide(&format!("Accel: {:.1}", accel));
-                    let mut r_l3 = RECT { left: 653, top: 150, right: 773, bottom: 168 };
+                    let mut r_l3 = RECT { left: 652, top: 134, right: 764, bottom: 149 };
                     DrawTextW(hdc, line3.as_ptr(), line3.len() as i32 - 1, &mut r_l3, 0);
                     
                     SelectObject(hdc, old_font_txt);
@@ -1837,13 +1857,15 @@ unsafe extern "system" fn hud_wnd_proc(
                         })
                     };
                     let old_font_number = SelectObject(hdc, fonts.number);
-                    SetTextColor(hdc, if is_pro || is_trial { 0xFFFFFF } else { 0x333333 });
+                    SetTextColor(hdc, if is_pro || is_trial { 0xFFFFFF } else { 0x444444 });
                     let sens_val_text = encode_wide(&format!("{:.1}", sens_val));
-                    let mut r_sens_val = RECT { left: 638, top: 114, right: 778, bottom: 159 };
-                    DrawTextW(hdc, sens_val_text.as_ptr(), sens_val_text.len() as i32 - 1, &mut r_sens_val, 1 | 32);
+                    let mut r_sens_val = RECT { left: 646, top: 113, right: 770, bottom: 149 };
+                    DrawTextW(hdc, sens_val_text.as_ptr(), sens_val_text.len() as i32 - 1, &mut r_sens_val, 1 | 32 | 4);
                     SelectObject(hdc, old_font_number);
                 }
 
+                let hover_val = HUD_HOVER.load(Ordering::SeqCst);
+                
                 // Draw [-] Button
                 let (dec_bg, dec_border, dec_text_color) = if !(is_pro || is_trial) {
                     (0x121414, 0x222222, 0x333333)
@@ -1852,15 +1874,7 @@ unsafe extern "system" fn hud_wnd_proc(
                 } else {
                     (0x202424, 0x3C4040, 0x888888)
                 };
-                // Draw [-] Button
-                let (dec_bg, dec_border, dec_text_color) = if !(is_pro || is_trial) {
-                    (0x121414, 0x222222, 0x333333)
-                } else if hover_val == 3 {
-                    (0x3C4040, 0xADFF2F, 0xADFF2F)
-                } else {
-                    (0x202424, 0x3C4040, 0x888888)
-                };
-                draw_hud_button(hdc, 644, 170, 702, 202, 6, dec_bg, dec_border, dec_text_color, "-", fonts.title, 37, -3);
+                draw_hud_button(hdc, 648, 154, 703, 186, 5, dec_bg, dec_border, dec_text_color, "-", fonts.title, 37, -3);
 
                 // Draw [+] Button
                 let (inc_bg, inc_border, inc_text_color) = if !(is_pro || is_trial) {
@@ -1870,9 +1884,13 @@ unsafe extern "system" fn hud_wnd_proc(
                 } else {
                     (0x202424, 0x3C4040, 0x888888)
                 };
-                draw_hud_button(hdc, 710, 170, 768, 202, 6, inc_bg, inc_border, inc_text_color, "+", fonts.title, 37, -4);
+                draw_hud_button(hdc, 713, 154, 768, 186, 5, inc_bg, inc_border, inc_text_color, "+", fonts.title, 37, -4);
 
                 // 1. Draw Grid Mode Button
+                let pm_enabled = {
+                    let state_arc = crate::hook::APP_STATE.get();
+                    state_arc.map_or(false, |arc| arc.lock().unwrap().config.settings.pixel_mode.unwrap_or(false))
+                };
                 let (pm_bg, pm_border, pm_text_color) = if !(is_pro || is_trial) {
                     (0x121414, 0x222222, 0x333333)
                 } else if pm_enabled {
@@ -1880,12 +1898,14 @@ unsafe extern "system" fn hud_wnd_proc(
                 } else {
                     if hover_val == 5 { (0x3C4040, 0xADFF2F, 0xFFFFFF) } else { (0x202424, 0x3C4040, 0x888888) }
                 };
-                let pm_label_str = if lang_en {
+                let pm_label_str = if !(is_pro || is_trial) {
+                    ""
+                } else if lang_en {
                     if pm_enabled { "Grid Mode: ON" } else { "Grid Mode: OFF" }
                 } else {
                     if pm_enabled { "그리드 모드: ON" } else { "그리드 모드: OFF" }
                 };
-                draw_hud_button(hdc, 644, 210, 772, 242, 6, pm_bg, pm_border, pm_text_color, pm_label_str, fonts.key, 37, 0);
+                draw_hud_button(hdc, 648, 191, 768, 223, 5, pm_bg, pm_border, pm_text_color, pm_label_str, fonts.key, 37, 0);
 
                 // 2. Draw Magnet Mode Button
                 let magnet_enabled = {
@@ -1899,12 +1919,14 @@ unsafe extern "system" fn hud_wnd_proc(
                 } else {
                     if hover_val == 7 { (0x3C4040, 0xADFF2F, 0xFFFFFF) } else { (0x202424, 0x3C4040, 0x888888) }
                 };
-                let mag_label_str = if lang_en {
+                let mag_label_str = if !(is_pro || is_trial) {
+                    ""
+                } else if lang_en {
                     if magnet_enabled { "Magnet Mode: ON" } else { "Magnet Mode: OFF" }
                 } else {
                     if magnet_enabled { "자석 모드: ON" } else { "자석 모드: OFF" }
                 };
-                draw_hud_button(hdc, 644, 250, 772, 282, 6, mag_bg, mag_border, mag_text_color, mag_label_str, fonts.key, 37, 0);
+                draw_hud_button(hdc, 648, 228, 768, 260, 5, mag_bg, mag_border, mag_text_color, mag_label_str, fonts.key, 37, 0);
 
                 // 3. Draw Auto-Start Toggle Button
                 let autostart_enabled = check_autostart_status_win();
@@ -1915,12 +1937,14 @@ unsafe extern "system" fn hud_wnd_proc(
                 } else {
                     if hover_val == 9 { (0x3C4040, 0xADFF2F, 0xFFFFFF) } else { (0x202424, 0x3C4040, 0x888888) }
                 };
-                let auto_label_str = if lang_en {
+                let auto_label_str = if !(is_pro || is_trial) {
+                    ""
+                } else if lang_en {
                     if autostart_enabled { "Auto-Start: ON" } else { "Auto-Start: OFF" }
                 } else {
                     if autostart_enabled { "자동 실행: ON" } else { "자동 실행: OFF" }
                 };
-                draw_hud_button(hdc, 644, 290, 772, 322, 6, auto_bg, auto_border, auto_text_color, auto_label_str, fonts.key, 37, 0);
+                draw_hud_button(hdc, 648, 265, 768, 297, 5, auto_bg, auto_border, auto_text_color, auto_label_str, fonts.key, 37, 0);
 
                 // 4. Draw Details Toggle Button
                 let sens_info_enabled = SHOW_ALL_SENS.load(Ordering::SeqCst);
@@ -1931,18 +1955,20 @@ unsafe extern "system" fn hud_wnd_proc(
                 } else {
                     if hover_val == 8 { (0x3C4040, 0xADFF2F, 0xFFFFFF) } else { (0x202424, 0x3C4040, 0x888888) }
                 };
-                let si_label_str = if sens_info_enabled {
+                let si_label_str = if !(is_pro || is_trial) {
+                    ""
+                } else if sens_info_enabled {
                     if lang_en { "Standard" } else { "기본보기" }
                 } else {
                     if lang_en { "Details" } else { "상세보기" }
                 };
-                draw_hud_button(hdc, 644, 330, 772, 362, 6, si_bg, si_border, si_text_color, si_label_str, fonts.key, 37, 0);
+                draw_hud_button(hdc, 648, 302, 768, 334, 5, si_bg, si_border, si_text_color, si_label_str, fonts.key, 37, 0);
 
                 if !(is_pro || is_trial) {
                     let lock_icon = encode_wide("🔒");
                     let old_font_icon = SelectObject(hdc, fonts.title);
                     SetTextColor(hdc, 0x777777);
-                    let mut r_lock_icon = RECT { left: 638, top: 160, right: 778, bottom: 200 };
+                    let mut r_lock_icon = RECT { left: 638, top: 200, right: 778, bottom: 235 };
                     DrawTextW(hdc, lock_icon.as_ptr(), lock_icon.len() as i32 - 1, &mut r_lock_icon, 1 | 32);
                     SelectObject(hdc, old_font_icon);
                     
@@ -1953,7 +1979,7 @@ unsafe extern "system" fn hud_wnd_proc(
                     };
                     let old_font_msg = SelectObject(hdc, fonts.key);
                     SetTextColor(hdc, 0x888888);
-                    let mut r_lock_msg = RECT { left: 638, top: 210, right: 778, bottom: 240 };
+                    let mut r_lock_msg = RECT { left: 638, top: 240, right: 778, bottom: 270 };
                     DrawTextW(hdc, lock_msg.as_ptr(), lock_msg.len() as i32 - 1, &mut r_lock_msg, 1 | 32);
                     SelectObject(hdc, old_font_msg);
                 }
@@ -2089,7 +2115,7 @@ unsafe extern "system" fn hud_wnd_proc(
                         toggle_language();
                         InvalidateRect(hwnd, std::ptr::null(), 0);
                     }
-                    HudHitTarget::DecSensitivity | HudHitTarget::IncSensitivity | HudHitTarget::TogglePixelMode | HudHitTarget::ToggleMagnet | HudHitTarget::ToggleDetail
+                    HudHitTarget::DecSensitivity | HudHitTarget::IncSensitivity | HudHitTarget::TogglePixelMode | HudHitTarget::ToggleMagnet | HudHitTarget::ToggleAutoStart | HudHitTarget::ToggleDetail
                     | HudHitTarget::EditBaseSpeed | HudHitTarget::EditMaxSpeed | HudHitTarget::EditAcceleration => {
                         if !(is_pro || is_trial) {
                             let msg_text = if lang_en {

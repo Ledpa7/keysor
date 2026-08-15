@@ -64,15 +64,15 @@ pub fn restore_windows_system_cursor() {
 
 #[cfg(target_os = "windows")]
 fn run_windows_watchdog(parent_pid: u32) {
-    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, SYNCHRONIZE};
-    use windows_sys::Win32::System::Threading::WaitForSingleObject;
+    const SYNCHRONIZE: u32 = 0x00100000;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, WaitForSingleObject};
 
     unsafe {
         // 켜지자마자 이전 남아있을 수 있는 투명 커서 1차 복구 (Self-Healing)
         restore_windows_system_cursor();
 
         let h_process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION, 0, parent_pid);
-        if !h_process.is_null() {
+        if h_process != 0 {
             // CPU 점유율 0.00% 완전 수면 상태로 부모(메인 키서) 프로세스 강제종료/사망 감시 대기
             WaitForSingleObject(h_process, 0xFFFFFFFF); // INFINITE
             windows_sys::Win32::Foundation::CloseHandle(h_process);
@@ -116,7 +116,7 @@ fn main() {
         }));
 
         unsafe {
-            unsafe extern "system" fn win32_crash_exception_filter(_: *mut windows_sys::Win32::System::Diagnostics::Debug::EXCEPTION_POINTERS) -> i32 {
+            unsafe extern "system" fn win32_crash_exception_filter(_: *const windows_sys::Win32::System::Diagnostics::Debug::EXCEPTION_POINTERS) -> i32 {
                 restore_windows_system_cursor();
                 1 // EXCEPTION_EXECUTE_HANDLER
             }
