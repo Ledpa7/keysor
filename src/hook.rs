@@ -861,11 +861,21 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
             }
         }
 
-        // 1. 키서 프로그램 완전 종료/토글 핫키: Ctrl + Alt + K (Windows 바로가기 핫키와 연동되어 토글되도록 Pass)
+        // 1. 키서 프로그램 완전 종료/토글 핫키: Ctrl + Alt + K
         if event.is_keydown && event.vk_code == 0x4B /* VK_K */ {
-            if let Ok(state) = state_arc.try_lock() {
+            if let Ok(mut state) = state_arc.try_lock() {
                 if state.ctrl_pressed && state.alt_pressed {
-                    return HookResult::Pass;
+                    println!("[Toggle] Ctrl + Alt + K triggered. Terminating cleanly and creating suppression flag...");
+                    
+                    // Windows 쉘의 바로가기 재실행을 억제하기 위한 토글 플래그 생성
+                    let flag_path = std::env::temp_dir().join("keysor_toggle_off.flag");
+                    let _ = std::fs::write(&flag_path, b"1");
+
+                    state.deactivate_mouse_mode();
+                    #[cfg(windows)]
+                    crate::ui::win_gdi::force_restore_system_cursor();
+                    crate::hook::cleanup_hook();
+                    std::process::exit(0);
                 }
             }
         }

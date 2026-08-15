@@ -55,61 +55,38 @@ fn ensure_single_instance() -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn toggle_single_instance_win() -> bool {
-    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
-    };
-    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+fn check_toggle_and_single_instance() -> bool {
+    // 1. Ctrl + Alt + K 종료 직후 Windows 쉘 바로가기가 프로세스를 재시작시키는 것을 억제
+    let flag_path = std::env::temp_dir().join("keysor_toggle_off.flag");
+    if let Ok(metadata) = std::fs::metadata(&flag_path) {
+        if let Ok(modified) = metadata.modified() {
+            if let Ok(elapsed) = modified.elapsed() {
+                if elapsed < std::time::Duration::from_millis(2500) {
+                    let _ = std::fs::remove_file(&flag_path);
+                    println!("[Toggle] Suppression flag active (<2.5s). Exiting new instance (Toggle OFF successful).");
+                    restore_windows_system_cursor();
+                    return false;
+                }
+            }
+        }
+    }
+    let _ = std::fs::remove_file(&flag_path);
 
-    let current_pid = std::process::id();
-    let mut other_pids = Vec::new();
+    // 2. 이미 다른 Keysor 메인 프로세스가 구동 중인 경우 단일 인스턴스 보장
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+    use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
 
+    let mutex_name = encode_wide("Local\\Keysor_Single_Instance_Mutex");
     unsafe {
-        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snapshot != INVALID_HANDLE_VALUE {
-            let mut entry: PROCESSENTRY32W = std::mem::zeroed();
-            entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
-
-            if Process32FirstW(snapshot, &mut entry) != 0 {
-                loop {
-                    let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
-                    let exe_name = String::from_utf16_lossy(&entry.szExeFile[..len]);
-
-                    if exe_name.eq_ignore_ascii_case("keysor.exe") && entry.th32ProcessID != current_pid {
-                        other_pids.push(entry.th32ProcessID);
-                    }
-
-                    if Process32NextW(snapshot, &mut entry) == 0 {
-                        break;
-                    }
-                }
-            }
-            CloseHandle(snapshot);
+        let mutex = CreateMutexW(std::ptr::null(), 0, mutex_name.as_ptr());
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            println!("[SingleInstance] Another Keysor instance is already running. Exiting duplicate instance.");
+            return false;
         }
+        Box::leak(Box::new(mutex));
     }
 
-    if !other_pids.is_empty() {
-        println!("[Toggle] Existing Keysor process(es) detected: {:?}. Terminating for Toggle OFF...", other_pids);
-
-        for &pid in &other_pids {
-            unsafe {
-                let h_proc = OpenProcess(PROCESS_TERMINATE, 0, pid);
-                if h_proc != 0 {
-                    TerminateProcess(h_proc, 0);
-                    CloseHandle(h_proc);
-                }
-            }
-        }
-
-        // 시스템 마우스 커서 100% 복구
-        restore_windows_system_cursor();
-        std::thread::sleep(std::time::Duration::from_millis(60));
-        restore_windows_system_cursor();
-        return false; // 신규 프로세스 종료 -> 토글 OFF 완료
-    }
-
-    true // 다른 프로세스가 없으므로 정상 부팅 -> 토글 ON 완료
+    true
 }
 
 #[cfg(target_os = "windows")]
@@ -180,9 +157,8 @@ fn main() {
             }
         }
 
-        // 1. 단일 인스턴스 토글 스위치 (이미 켜져있으면 기존 프로세스 종료 후 종료 = Toggle OFF)
-        if !toggle_single_instance_win() {
-            println!("[Keysor] Successfully toggled OFF existing Keysor instance.");
+        // 1. 단일 인스턴스 토글 스위치 (종료 직후 재실행 억제 및 중복 실행 방지)
+        if !check_toggle_and_single_instance() {
             return;
         }
     }
