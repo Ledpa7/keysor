@@ -875,6 +875,8 @@ void keysor_macos_ui_update_pos(double x, double y) {
     }
 }
 
+static uint64_t g_clickMotionSeq = 0;
+
 void keysor_macos_ui_set_click_motion(int click_type) {
     void (^motionBlock)(void) = ^{
         if (g_cursorView == nil) return;
@@ -883,15 +885,23 @@ void keysor_macos_ui_set_click_motion(int click_type) {
             BOOL isSnapped = keysor_macos_check_is_snapped();
             targetState = isSnapped ? 5 : 0;
         }
-        g_cursorView.cursorState = targetState;
-        [g_cursorView setNeedsDisplay:YES];
+
+        if (g_cursorView.cursorState != targetState) {
+            g_cursorView.cursorState = targetState;
+            [g_cursorView setNeedsDisplay:YES];
+        }
+
+        uint64_t currentSeq = ++g_clickMotionSeq;
 
         if (click_type > 0 && click_type != 5) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 180 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
-                if (g_cursorView != nil && g_cursorView.cursorState == click_type) {
+                if (g_cursorView != nil && g_clickMotionSeq == currentSeq) {
                     BOOL isSnapped = keysor_macos_check_is_snapped();
-                    g_cursorView.cursorState = isSnapped ? 5 : 0;
-                    [g_cursorView setNeedsDisplay:YES];
+                    int resetState = isSnapped ? 5 : 0;
+                    if (g_cursorView.cursorState != resetState) {
+                        g_cursorView.cursorState = resetState;
+                        [g_cursorView setNeedsDisplay:YES];
+                    }
                 }
             });
         }

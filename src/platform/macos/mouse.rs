@@ -51,11 +51,20 @@ impl MacosSystemController {
 
     // 특정 마우스 클릭 이벤트를 대상 좌표에 생성하여 전송하는 헬퍼 함수
     fn post_mouse_event(&self, mouse_type: u32, button: u32) {
+        self.post_mouse_event_with_click_count(mouse_type, button, 1);
+    }
+
+    fn post_mouse_event_with_click_count(&self, mouse_type: u32, button: u32, click_count: i64) {
         let (cx, cy) = self.get_cursor_pos();
         let pos = CGPoint { x: cx as f64, y: cy as f64 };
         unsafe {
+            unsafe extern "C" {
+                fn CGEventSetIntegerValueField(event: *mut c_void, field: u32, value: i64);
+            }
             let event = CGEventCreateMouseEvent(std::ptr::null_mut(), mouse_type, pos, button);
             if !event.is_null() {
+                // kCGMouseEventClickState = 1
+                CGEventSetIntegerValueField(event, 1, click_count);
                 CGEventPost(K_CG_SESSION_EVENT_TAP, event);
                 CFRelease(event);
             }
@@ -152,9 +161,13 @@ impl SystemController for MacosSystemController {
     }
 
     fn left_double_click(&self) {
-        self.left_click();
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        self.left_click();
+        self.post_mouse_event_with_click_count(K_CG_EVENT_LEFT_MOUSE_DOWN, K_CG_MOUSE_BUTTON_LEFT, 1);
+        std::thread::sleep(std::time::Duration::from_millis(15));
+        self.post_mouse_event_with_click_count(K_CG_EVENT_LEFT_MOUSE_UP, K_CG_MOUSE_BUTTON_LEFT, 1);
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        self.post_mouse_event_with_click_count(K_CG_EVENT_LEFT_MOUSE_DOWN, K_CG_MOUSE_BUTTON_LEFT, 2);
+        std::thread::sleep(std::time::Duration::from_millis(15));
+        self.post_mouse_event_with_click_count(K_CG_EVENT_LEFT_MOUSE_UP, K_CG_MOUSE_BUTTON_LEFT, 2);
     }
 
     fn right_down(&self) {

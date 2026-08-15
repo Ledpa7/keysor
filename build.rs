@@ -13,6 +13,7 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=QuartzCore");
         println!("cargo:rustc-link-lib=framework=Carbon");
         println!("cargo:rerun-if-changed=src/platform/macos/overlay.m");
+        println!("cargo:rerun-if-changed=keysor.icns");
         cc::Build::new()
             .file("src/platform/macos/overlay.m")
             .flag("-fobjc-arc")

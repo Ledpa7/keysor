@@ -46,7 +46,7 @@ impl Default for Config {
                 max_speed: 30.0,
                 acceleration: 1.5,
                 unified_space_click: true,
-                double_click_threshold_ms: 100,
+                double_click_threshold_ms: 280,
                 drag_hold_threshold_ms: 250,
                 refresh_rate_hz: Some(100),
                 pixel_mode: Some(false),
@@ -103,7 +103,7 @@ settings:
 
   # 스페이스바 단일 키 클릭 연동 특수 기능 활성화
   unified_space_click: true
-  double_click_threshold_ms: 100
+  double_click_threshold_ms: 280
   drag_hold_threshold_ms: 250
   refresh_rate_hz: 100         # 이동 주기 주사율 (기본값 100Hz, 원격 접속 시 60으로 낮추면 부드러워짐)
   magnetic_mode: false         # 자석 모드 활성화 여부 (HUD 버튼에 마우스가 다가가면 흡착)
@@ -178,7 +178,7 @@ settings:
   acceleration: 1.5            # 누르고 있을 때의 가속도 비율
 
   unified_space_click: true
-  double_click_threshold_ms: 100
+  double_click_threshold_ms: 280
   drag_hold_threshold_ms: 250
   refresh_rate_hz: 100         # 이동 주기 주사율 (기본값 100Hz)
   magnetic_mode: false
