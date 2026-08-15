@@ -56,37 +56,60 @@ fn ensure_single_instance() -> bool {
 
 #[cfg(target_os = "windows")]
 fn toggle_single_instance_win() -> bool {
-    use windows_sys::Win32::System::Threading::CreateMutexW;
-    use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW, WM_CLOSE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+    };
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
 
-    let mutex_name = encode_wide("Local\\Keysor_Single_Instance_Mutex");
+    let current_pid = std::process::id();
+    let mut other_pids = Vec::new();
+
     unsafe {
-        let mutex = CreateMutexW(std::ptr::null(), 0, mutex_name.as_ptr());
-        if GetLastError() == ERROR_ALREADY_EXISTS {
-            println!("[Toggle] Keysor is already running. Toggling OFF (terminating existing instance)...");
-            
-            // 기존 Keysor 메인 및 HUD 창을 찾아 WM_CLOSE 전송
-            let main_class = encode_wide("KeysorMainDummyClass");
-            let main_hwnd = FindWindowW(main_class.as_ptr(), std::ptr::null());
-            if main_hwnd != 0 {
-                PostMessageW(main_hwnd, WM_CLOSE, 0, 0);
-            }
-            let hud_class = encode_wide("KeysorHUDClass");
-            let hud_hwnd = FindWindowW(hud_class.as_ptr(), std::ptr::null());
-            if hud_hwnd != 0 {
-                PostMessageW(hud_hwnd, WM_CLOSE, 0, 0);
-            }
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot != INVALID_HANDLE_VALUE {
+            let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+            entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
 
-            restore_windows_system_cursor();
-            std::thread::sleep(std::time::Duration::from_millis(150));
-            return false;
+            if Process32FirstW(snapshot, &mut entry) != 0 {
+                loop {
+                    let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+                    let exe_name = String::from_utf16_lossy(&entry.szExeFile[..len]);
+
+                    if exe_name.eq_ignore_ascii_case("keysor.exe") && entry.th32ProcessID != current_pid {
+                        other_pids.push(entry.th32ProcessID);
+                    }
+
+                    if Process32NextW(snapshot, &mut entry) == 0 {
+                        break;
+                    }
+                }
+            }
+            CloseHandle(snapshot);
         }
-        
-        // Mutex 핸들을 영구 보존하여 프로세스 라이프타임 동안 단일 인스턴스 유지
-        Box::leak(Box::new(mutex));
     }
-    true
+
+    if !other_pids.is_empty() {
+        println!("[Toggle] Existing Keysor process(es) detected: {:?}. Terminating for Toggle OFF...", other_pids);
+
+        for &pid in &other_pids {
+            unsafe {
+                let h_proc = OpenProcess(PROCESS_TERMINATE, 0, pid);
+                if h_proc != 0 {
+                    TerminateProcess(h_proc, 0);
+                    CloseHandle(h_proc);
+                }
+            }
+        }
+
+        // 시스템 마우스 커서 100% 복구
+        restore_windows_system_cursor();
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        restore_windows_system_cursor();
+        return false; // 신규 프로세스 종료 -> 토글 OFF 완료
+    }
+
+    true // 다른 프로세스가 없으므로 정상 부팅 -> 토글 ON 완료
 }
 
 #[cfg(target_os = "windows")]
