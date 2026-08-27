@@ -66,7 +66,6 @@ impl Default for Config {
                 Binding { trigger: "Q".to_string(), action: "MouseScrollLeft".to_string() },
                 Binding { trigger: "E".to_string(), action: "MouseScrollRight".to_string() },
                 Binding { trigger: "G".to_string(), action: "MouseRightClick".to_string() },
-                Binding { trigger: "RightShift".to_string(), action: "MouseRightClick".to_string() },
             ],
         }
     }
@@ -139,8 +138,6 @@ bindings:
     action: "MouseScrollRight"
   - trigger: "G"
     action: "MouseRightClick"
-  - trigger: "RightShift"
-    action: "MouseRightClick"
 "#;
         std::fs::write(&path, yaml_content).ok();
         return default_cfg;
@@ -205,8 +202,6 @@ bindings:
   - trigger: "E"
     action: "MouseScrollRight"
   - trigger: "G"
-    action: "MouseRightClick"
-  - trigger: "RightShift"
     action: "MouseRightClick"
 "#;
             std::fs::write(path.as_ref(), default_yaml).ok();

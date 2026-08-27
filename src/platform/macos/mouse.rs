@@ -313,6 +313,10 @@ impl SystemController for MacosSystemController {
         }
     }
 
+    fn simulate_enter_key(&self) {
+        self.post_key_event(36, 0); // Return keycode 36
+    }
+
     fn run_app(&self, app_path: &str) -> Result<(), String> {
         std::process::Command::new("open")
             .arg(app_path)
@@ -322,7 +326,11 @@ impl SystemController for MacosSystemController {
     }
 
     fn ensure_caps_lock_off(&self) {
-        if self.is_caps_lock_on() {
+        self.ensure_caps_lock_state(false);
+    }
+
+    fn ensure_caps_lock_state(&self, target_on: bool) {
+        if self.is_caps_lock_on() != target_on {
             self.inject_caps_lock_toggle();
         }
     }

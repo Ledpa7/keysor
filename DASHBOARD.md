@@ -89,7 +89,25 @@
   - **Program Files 배포**: OS 커널 `uiAccess="true"` 특권 승인 조건인 `C:\Program Files\Keysor\keysor.exe` 경로 배포 및 바탕화면 바로가기(`keysor.lnk`) 타깃 동기화 완료.
   - **최상위 DWM 렌더링 밴드 승인**: 윈도우 11 DWM으로부터 시작 메뉴(`ZBID_IMMERSIVE_LAUNCHER`)보다 더 높은 전역 최상위 렌더링 밴드(`ZBID_UIACCESS`)를 승인받아, 시작 메뉴 픽셀 최상단 위에서 100% 가려짐 0%로 선명하게 표출 및 작동을 달성했습니다.
 
-## 📅 최신 패치 및 수정 내역 (Latest Updates - 2026-07-23)
+## 📅 최신 패치 및 수정 내역 (Latest Updates - 2026-08-28)
+
+- **[x] Windows OS 1ms 고정밀 타이머 & 프레임레이트 독립적 이동 델타(`dt`) 정규화**:
+  - `src/hook.rs` [MODIFY]: `start_hook` 및 `cleanup_hook`에 `timeBeginPeriod(1)` / `timeEndPeriod(1)`을 연동하여 백그라운드 앱 실행 여부와 관계없이 항상 100Hz 루프가 정확한 10ms 주기로 실행되도록 보장했습니다.
+  - `src/hook.rs` [MODIFY]: 루프 내 실측 프레임 간격(`dt`)을 측정하여 `speed * (dt * 100.0)` 형태로 100Hz 기준 물리 이동 속도를 정규화했습니다. 시스템 부하나 주사율 변동이 발생해도 초당 이동 거리가 항상 일정하게 유지되도록 개선했습니다.
+  - `src/hook.rs` [MODIFY]: PC 절전 해제 시 순간 이동을 방지하기 위해 `dt.min(0.05)` 안전 클램핑을 적용했습니다.
+
+- **[x] Shift + Space -> Enter 키 에뮬레이션 단축키 신설**:
+  - `src/platform/mod.rs` [MODIFY], `src/platform/windows/mouse.rs` [MODIFY], `src/platform/macos/mouse.rs` [MODIFY]: `SystemController` 인터페이스에 `simulate_enter_key()`를 신설했습니다.
+  - Windows에서는 Shift 물리 키 상태를 일시 릴리즈한 후 `VK_RETURN`을 전송하여 메신저(디스코드, 슬랙 등)에서 줄바꿈이 아닌 **정상적인 엔터 실행/전송**으로 인식되도록 정밀 처리했습니다. (macOS는 `Return(keycode 36)` 합성 이벤트 전송)
+  - `src/hook.rs` [MODIFY]: 마우스 모드 중 `Shift + Space` 입력 시 `process_space_click` 대신 Enter 키 입력을 즉시 시뮬레이션하도록 가로채기를 구현했습니다.
+  - `src/ui/win_gdi.rs` [MODIFY]: HUD UI의 Spacebar 캡션에 `+Shift:Enter` 가이드를 추가 반영했습니다.
+
+- **[x] 우측 Shift (RightShift) 우클릭 바인딩 해제 및 수식키 복원**:
+  - `src/config.rs` [MODIFY]: 기본 바인딩 목록 및 복구 템플릿에서 `RightShift -> MouseRightClick` 바인딩을 제거하여 우측 Shift 키가 정상적인 Shift 수식키(`Shift+Space`, `Shift+Q/E`, `Shift+J/K` 등)로 동작하도록 복원했습니다.
+
+---
+
+## 📅 이전 패치 및 수정 내역 (Previous Updates - 2026-07-23)
 
 - **[x] LocalMachine 코드 서명 인증서 자동화 & UIAccess 100% 승인 체계 구축**:
   - `sign_and_deploy.ps1` [MODIFY]: UIAccess 특권 승인 핵심 요구사항인 `Cert:\LocalMachine\Root` 및 `Cert:\LocalMachine\TrustedPublisher` 스토어에 `KeysorDevCert` 인증서를 자동 등록하는 파이프라인을 완비했습니다.

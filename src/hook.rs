@@ -224,6 +224,13 @@ impl AppState {
 pub static APP_STATE: OnceLock<Arc<Mutex<AppState>>> = OnceLock::new();
 static KEYBOARD_HOOK: OnceLock<Box<dyn KeyboardHook>> = OnceLock::new();
 
+#[cfg(windows)]
+#[link(name = "winmm")]
+unsafe extern "system" {
+    fn timeBeginPeriod(uPeriod: u32) -> u32;
+    fn timeEndPeriod(uPeriod: u32) -> u32;
+}
+
 /// 마우스 조작 모드 활성화 시 WASD 방향 입력을 누적하여 상대적 이동 델타를 갱신합니다.
 /// 락 획득 최소화를 위해 pre-acquired 이동 설정을 인자로 받아 처리합니다.
 fn process_mouse_movement(
@@ -231,6 +238,7 @@ fn process_mouse_movement(
     movement_settings: Option<MovementSettings>,
     needs_reset: bool,
     dpi_scale: f64,
+    dt: f64,
     remainder_x: &mut f64,
     remainder_y: &mut f64,
 ) {
@@ -253,8 +261,12 @@ fn process_mouse_movement(
         if params.shift_pressed {
             speed /= 4.0;
         }
+
+        // 100Hz (10ms = 0.010s) 기준 시간 비율 정규화 (dt가 10ms일 때 1.0, 15ms일 때 1.5)
+        let normalized_speed = speed * (dt * 100.0);
+
         let (move_x, move_y) = crate::math::calculate_movement_delta(
-            speed,
+            normalized_speed,
             params.dx,
             params.dy,
             params.pixel_mode,
@@ -351,8 +363,14 @@ fn start_movement_thread(state_ptr: Arc<Mutex<AppState>>) {
         let mut remainder_scroll_x = 0.0f64;
         let mut remainder_scroll_y = 0.0f64;
         let mut was_mouse_mode = false;
+        let mut last_tick = Instant::now();
         loop {
             thread::sleep(Duration::from_millis(interval_ms));
+
+            // 실제 프레임 경과 시간 측정 (최대 50ms로 클램핑하여 절전 해제 시 순간 이동 방지)
+            let now = Instant::now();
+            let dt = now.duration_since(last_tick).as_secs_f64().min(0.05);
+            last_tick = now;
 
             // 단일 락 획득으로 모든 상태 및 제어 파라미터를 동시 추출하여 락 경쟁 최소화
             let (is_mouse_mode, hz, movement_settings, scroll_settings, needs_movement_reset, needs_scroll_reset) = {
@@ -369,12 +387,13 @@ fn start_movement_thread(state_ptr: Arc<Mutex<AppState>>) {
 
             let is_moving = movement_settings.is_some();
 
-            // 1. 이동 연산 처리 (락이 이미 릴리즈된 상태에서 계산 및 API 호출)
+            // 1. 이동 연산 처리 (락이 이미 릴리즈된 상태에서 계산 및 API 호출, dt 정규화 적용)
             process_mouse_movement(
                 &state_ptr,
                 movement_settings,
                 needs_movement_reset,
                 dpi_scale,
+                dt,
                 &mut remainder_x,
                 &mut remainder_y,
             );
@@ -384,24 +403,6 @@ fn start_movement_thread(state_ptr: Arc<Mutex<AppState>>) {
                 crate::indicator::update_indicator_position();
                 crate::indicator::check_magnetic_snapping();
                 crate::indicator::check_global_magnetic_snapping(is_moving);
-
-                // 안전장치: 마우스 모드 진입 후 30초 동안 아무 키 입력이 없으면 커서 안전 자동 원복
-                let should_timeout = {
-                    if let Ok(state) = state_ptr.try_lock() {
-                        state.last_input_time.elapsed() >= Duration::from_secs(30)
-                    } else {
-                        false
-                    }
-                };
-                if should_timeout {
-                    if let Ok(mut state) = state_ptr.try_lock() {
-                        println!("[Safety] 30s inactivity in mouse mode. Auto-restoring system cursor.");
-                        state.deactivate_mouse_mode();
-                        #[cfg(windows)]
-                        crate::ui::win_gdi::force_restore_system_cursor();
-                        crate::indicator::hide_indicator();
-                    }
-                }
 
                 was_mouse_mode = true;
             } else if was_mouse_mode {
@@ -413,7 +414,6 @@ fn start_movement_thread(state_ptr: Arc<Mutex<AppState>>) {
             // 마우스 모드가 비활성화 상태인 경우 불필요한 루프 오버헤드를 낮추기 위해 40Hz(25ms)로 동작
             let safe_hz = if is_mouse_mode { hz.max(10).min(1000) } else { 40 };
             interval_ms = 1000 / safe_hz;
-            let dt = interval_ms as f64 / 1000.0;
 
             // 3. 마우스 스크롤 연산 처리
             process_mouse_scrolling(
@@ -542,7 +542,6 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
         return Some(HookResult::Pass);
     }
 
-    let mut should_inject = false;
     let mut indicator_action = IndicatorAction::None;
 
     if let Some(state_arc) = APP_STATE.get() {
@@ -557,38 +556,34 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
 
             if should_process {
                 state.caps_lock_press_time = Some(Instant::now());
-                state.caps_lock_used_as_modifier = false;
 
                 if is_toggle_mode {
                     if state.is_mouse_mode {
                         println!("[Keysor] Caps Lock -> Mouse mode OFF (Toggle)");
                         state.deactivate_mouse_mode();
+                        get_system_controller().ensure_caps_lock_state(false);
                         indicator_action = IndicatorAction::Hide;
                     } else {
                         println!("[Keysor] Caps Lock -> Mouse mode ON (Toggle)");
                         state.is_mouse_mode = true;
+                        get_system_controller().ensure_caps_lock_state(true);
                         indicator_action = IndicatorAction::Show;
                     }
                 } else {
                     println!("[Keysor] Caps Lock -> Mouse mode ON (Hold)");
                     state.is_mouse_mode = true;
+                    get_system_controller().ensure_caps_lock_state(true);
                     indicator_action = IndicatorAction::Show;
                 }
             }
         } else if event.is_keyup {
-            let elapsed = state.caps_lock_press_time.map_or(Duration::ZERO, |t| t.elapsed());
-            let used_modifier = state.caps_lock_used_as_modifier;
-
             state.caps_lock_press_time = None;
 
             if !is_toggle_mode {
                 println!("[Keysor] Caps Lock Released -> Mouse mode OFF (Hold)");
                 state.deactivate_mouse_mode();
+                get_system_controller().ensure_caps_lock_state(false);
                 indicator_action = IndicatorAction::Hide;
-            }
-
-            if elapsed < Duration::from_millis(250) && !used_modifier {
-                should_inject = true;
             }
         }
     }
@@ -597,10 +592,6 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
         IndicatorAction::Show => crate::indicator::show_indicator(),
         IndicatorAction::Hide => crate::indicator::hide_indicator(),
         IndicatorAction::None => {}
-    }
-
-    if should_inject {
-        get_system_controller().inject_caps_lock_toggle();
     }
 
     Some(HookResult::Block)
@@ -853,6 +844,7 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
                 if state.ctrl_pressed && state.alt_pressed && state.shift_pressed {
                     println!("[Emergency] Emergency cursor restore hotkey triggered.");
                     state.deactivate_mouse_mode();
+                    get_system_controller().ensure_caps_lock_off();
                     #[cfg(windows)]
                     crate::ui::win_gdi::force_restore_system_cursor();
                     crate::indicator::hide_indicator();
@@ -867,6 +859,7 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
                 if state.ctrl_pressed && state.alt_pressed {
                     println!("[Shutdown] Ctrl + Alt + K triggered. Terminating Keysor cleanly...");
                     state.deactivate_mouse_mode();
+                    get_system_controller().ensure_caps_lock_off();
                     #[cfg(windows)]
                     crate::ui::win_gdi::force_restore_system_cursor();
                     crate::hook::cleanup_hook();
@@ -927,6 +920,19 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
             // 키서 단축키로 등록되지 않은 경우, 허용된 패스스루 키(숫자, 기능키, 편집키 등)라면 통과시킵니다.
             if !is_bound && is_allowed_pass_through_key(event.vk_code) {
                 return HookResult::Pass;
+            }
+
+            // Shift + Space 단축키를 통한 Enter 키 에뮬레이션
+            let is_shift_down = {
+                let state = state_arc.lock().unwrap();
+                state.shift_pressed
+            };
+            if event.vk_code == VK_SPACE && is_shift_down {
+                if event.is_keydown {
+                    println!("[Action] Shift + Space -> Enter simulated");
+                    get_system_controller().simulate_enter_key();
+                }
+                return HookResult::Block;
             }
 
             // Space + Scroll (R/F/Q/E) 단축키 조합을 통한 맨 위/아래/좌/우 Page Jump 처리
@@ -1046,6 +1052,15 @@ pub fn start_hook(config: Config, is_pro: bool, is_trial: bool) {
 
     APP_STATE.set(Arc::clone(&state)).ok();
 
+    // 0. 초기 구동 시 Caps Lock 상태를 안전하게 OFF로 리셋
+    get_system_controller().ensure_caps_lock_off();
+
+    // Windows 고정밀 1ms 멀티미디어 타이머 활성화
+    #[cfg(windows)]
+    unsafe {
+        timeBeginPeriod(1);
+    }
+
     // 1. liquid smooth 커서 가속 이동용 스레드 시작
     start_movement_thread(Arc::clone(&state));
 
@@ -1063,9 +1078,14 @@ pub fn cleanup_hook() {
     if let Some(hook) = KEYBOARD_HOOK.get() {
         hook.stop_listening();
     }
+    get_system_controller().ensure_caps_lock_off();
     // Restore system cursor on exit if it was hidden
     #[cfg(windows)]
     crate::ui::win_gdi::restore_system_cursor();
+    #[cfg(windows)]
+    unsafe {
+        timeEndPeriod(1);
+    }
 }
 
 fn on_deactivate_global() {
@@ -1073,6 +1093,7 @@ fn on_deactivate_global() {
         if let Ok(mut state) = state_arc.lock() {
             state.deactivate_mouse_mode();
         }
+        get_system_controller().ensure_caps_lock_off();
         crate::indicator::hide_indicator();
     }
 }

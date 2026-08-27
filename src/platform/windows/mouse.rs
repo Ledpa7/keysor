@@ -469,6 +469,59 @@ impl SystemController for WindowsSystemController {
         }
     }
 
+    fn simulate_enter_key(&self) {
+        let lshift_down = unsafe { (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0xA0) as u32 & 0x8000) != 0 };
+        let rshift_down = unsafe { (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0xA1) as u32 & 0x8000) != 0 };
+
+        unsafe {
+            let mut inputs = Vec::new();
+            if lshift_down {
+                let mut input = INPUT { r#type: INPUT_KEYBOARD, Anonymous: std::mem::zeroed() };
+                input.Anonymous.ki = KEYBDINPUT {
+                    wVk: 0xA0,
+                    wScan: 0x2A,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: KEYSOR_SIGNATURE,
+                };
+                inputs.push(input);
+            }
+            if rshift_down {
+                let mut input = INPUT { r#type: INPUT_KEYBOARD, Anonymous: std::mem::zeroed() };
+                input.Anonymous.ki = KEYBDINPUT {
+                    wVk: 0xA1,
+                    wScan: 0x36,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: KEYSOR_SIGNATURE,
+                };
+                inputs.push(input);
+            }
+
+            let mut enter_down = INPUT { r#type: INPUT_KEYBOARD, Anonymous: std::mem::zeroed() };
+            enter_down.Anonymous.ki = KEYBDINPUT {
+                wVk: 0x0D, // VK_RETURN
+                wScan: 0x1C,
+                dwFlags: 0,
+                time: 0,
+                dwExtraInfo: KEYSOR_SIGNATURE,
+            };
+            inputs.push(enter_down);
+
+            let mut enter_up = INPUT { r#type: INPUT_KEYBOARD, Anonymous: std::mem::zeroed() };
+            enter_up.Anonymous.ki = KEYBDINPUT {
+                wVk: 0x0D, // VK_RETURN
+                wScan: 0x1C,
+                dwFlags: KEYEVENTF_KEYUP,
+                time: 0,
+                dwExtraInfo: KEYSOR_SIGNATURE,
+            };
+            inputs.push(enter_up);
+
+            SendInput(inputs.len() as u32, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32);
+        }
+    }
+
     fn run_app(&self, app_path: &str) -> Result<(), String> {
         std::process::Command::new("cmd")
             .args(&["/C", "start", "", app_path])
@@ -478,7 +531,11 @@ impl SystemController for WindowsSystemController {
     }
 
     fn ensure_caps_lock_off(&self) {
-        if self.is_caps_lock_on() {
+        self.ensure_caps_lock_state(false);
+    }
+
+    fn ensure_caps_lock_state(&self, target_on: bool) {
+        if self.is_caps_lock_on() != target_on {
             self.inject_caps_lock_toggle();
         }
     }

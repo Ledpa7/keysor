@@ -1788,7 +1788,7 @@ unsafe extern "system" fn hud_wnd_proc(
                 let d_desc = if lang_en { "Right ▶" } else { "▶ 이동" };
                 let f_desc = if lang_en { "Whl ▼" } else { "휠▼" };
                 let g_desc = if lang_en { "R-Clk" } else { "우클릭" };
-                let space_desc = if lang_en { "Left Click (1:L / 2:Db / Hold:Drag)" } else { "좌클릭 (1:일반 / 2:더블 / 홀드:드래그)" };
+                let space_desc = if lang_en { "Left Click (1:L / 2:Db / +Shift:Enter)" } else { "좌클릭 (1:일반 / 2:더블 / +Shift:엔터)" };
                 
                 let title_text = if is_pro {
                     if lang_en {
