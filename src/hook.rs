@@ -96,7 +96,7 @@ impl AppState {
         let (base_speed, max_speed, acceleration) = if self.is_pro || self.is_trial {
             (settings.base_speed, settings.max_speed, settings.acceleration)
         } else {
-            (1.5, 30.0, 1.5)
+            (settings.base_speed, 30.0, 1.5)
         };
 
         Some(MovementSettings {
@@ -207,14 +207,12 @@ impl AppState {
         self.config = if features_enabled {
             new_config
         } else {
-            // Free 버전인 경우 감도, 키바인딩, 자석 스냅 설정을 디폴트로 강제 오버라이드
+            // Free 버전인 경우 고급 기능(키바인딩, 최고속도/가속도)을 디폴트로 강제 오버라이드
+            // 기본 시작 속도(base_speed) 및 자석 모드 조절은 모든 사용자에게 정상 반영 및 저장 허용
             let mut forced = new_config.clone();
             forced.bindings = config::Config::default().bindings;
-            forced.settings.base_speed = 1.5;
             forced.settings.max_speed = 30.0;
             forced.settings.acceleration = 1.5;
-            forced.settings.magnetic_mode = Some(false);
-            forced.settings.global_magnetic_mode = Some(false);
             forced
         };
         println!("[Hot-Reload] New configuration evaluated and applied. Pro features: {}.", features_enabled);

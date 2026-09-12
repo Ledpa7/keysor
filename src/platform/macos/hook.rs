@@ -137,8 +137,6 @@ fn macos_keycode_to_vk(keycode: u32) -> u32 {
     }
 }
 
-static mut CAPS_LOCK_DOWN_STATE: bool = false;
-
 // C 스타일 EventTap 콜백 함수
 extern "C" fn event_tap_callback(
     proxy: *mut c_void,
@@ -168,9 +166,15 @@ extern "C" fn event_tap_callback(
             } else if etype == K_CG_EVENT_KEY_UP {
                 false
             } else {
-                unsafe {
-                    CAPS_LOCK_DOWN_STATE = !CAPS_LOCK_DOWN_STATE;
-                    CAPS_LOCK_DOWN_STATE
+                let is_toggle_mode = crate::hook::APP_STATE.get()
+                    .and_then(|s| s.lock().ok())
+                    .map(|s| s.config.settings.modifier_mode.eq_ignore_ascii_case("Toggle"))
+                    .unwrap_or(true);
+
+                if is_toggle_mode {
+                    true
+                } else {
+                    (flags & 0x10000) != 0
                 }
             }
         } else if etype == K_CG_EVENT_FLAGS_CHANGED {

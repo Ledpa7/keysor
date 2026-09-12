@@ -155,6 +155,7 @@ pub fn check_macos_global_magnetic_snapping(is_moving: bool) {
                     let dist = ((cx - sx).powi(2) + (cy - sy).powi(2)).sqrt();
                     if dist <= 25.0 {
                         IS_SNAPPED.store(true, Ordering::SeqCst);
+                        crate::indicator::update_indicator_position();
                         return;
                     } else {
                         IS_SNAPPED.store(false, Ordering::SeqCst);
@@ -175,11 +176,11 @@ pub fn check_macos_global_magnetic_snapping(is_moving: bool) {
             return;
         }
 
-        // 2. 근처 소형 UI 버튼 초고속 단일 패스 탐색 (Mach IPC 호출을 60회에서 3회로 95% 감축하여 0ms 버벅임 무지연 단번에 스냅)
+        // 2. 필수 버튼/링크/체크박스/메뉴/탭 요소 정밀 단일 히트 스캔 (불필요한 셀/텍스트상자/컨테이너 스냅 제외)
         let system_wide = AXUIElementCreateSystemWide();
         if system_wide.is_null() { return; }
 
-        let snap_threshold = 25.0; // 윈도우 고정 25.0px
+        let snap_threshold = 25.0; // 윈도우 버전 표준 25.0px 스냅 반경
         let attr_role = create_cf_string("AXRole");
         let attr_pos = create_cf_string("AXPosition");
         let attr_size = create_cf_string("AXSize");
@@ -191,23 +192,26 @@ pub fn check_macos_global_magnetic_snapping(is_moving: bool) {
         let err = AXUIElementCopyElementAtPosition(system_wide, cx as f32, cy as f32, &mut elem);
         if err == 0 && !elem.is_null() {
             let mut elem_pid: i32 = 0;
-            if AXUIElementGetPid(elem, &mut elem_pid) == 0 && elem_pid != my_pid {
-                let mut to_release: Vec<*mut c_void> = Vec::with_capacity(3);
+            AXUIElementGetPid(elem, &mut elem_pid);
+            if elem_pid != my_pid {
+                let mut to_release: Vec<*mut c_void> = Vec::with_capacity(6);
                 to_release.push(elem);
 
                 let mut current_eval = elem;
                 let mut depth = 0;
 
-                while !current_eval.is_null() && depth < 2 {
+                while !current_eval.is_null() && depth < 4 {
                     let mut role_val: *mut c_void = std::ptr::null_mut();
                     if AXUIElementCopyAttributeValue(current_eval, attr_role, &mut role_val) == 0 && !role_val.is_null() {
                         let role = get_cf_string_val(role_val);
                         CFRelease(role_val);
 
+                        // 필수 클릭 컨트롤 요소만 한정 대상화 (AXCell, AXTextField, AXTextArea, AXComboBox 제외)
                         let is_target_role = matches!(
                             role.as_str(),
                             "AXButton" | "AXLink" | "AXPopUpButton" | "AXCheckBox"
                             | "AXRadioButton" | "AXMenuItem" | "AXTabButton" | "AXMenuButton"
+                            | "AXToggleButton"
                         );
 
                         if is_target_role {
@@ -224,7 +228,8 @@ pub fn check_macos_global_magnetic_snapping(is_moving: bool) {
                                 if AXValueGetValue(pos_val, 1, &mut pt as *mut _ as *mut c_void)
                                     && AXValueGetValue(size_val, 2, &mut sz as *mut _ as *mut c_void)
                                 {
-                                    if sz.width >= 6.0 && sz.width <= 320.0 && sz.height >= 6.0 && sz.height <= 120.0 {
+                                    // 버튼 및 탭 규격에 맞는 소형/중형 버튼만 스냅 허용 (대형 패널/컨테이너 스냅 방지)
+                                    if sz.width >= 8.0 && sz.width <= 320.0 && sz.height >= 8.0 && sz.height <= 80.0 {
                                         let center_x = if sz.width <= 60.0 {
                                             pt.x + sz.width / 2.0
                                         } else {
@@ -239,7 +244,7 @@ pub fn check_macos_global_magnetic_snapping(is_moving: bool) {
                                         let is_recently_escaped = if let Ok(ec_opt) = ESCAPED_CENTER.lock() {
                                             if let Some(((ex, ey), t_esc)) = *ec_opt {
                                                 if t_esc.elapsed() < Duration::from_millis(200) {
-                                                    ((center_x - ex).powi(2) + (center_y - cy).powi(2)).sqrt() <= 25.0
+                                                    ((center_x - ex).powi(2) + (center_y - ey).powi(2)).sqrt() <= 25.0
                                                 } else {
                                                     false
                                                 }
@@ -299,7 +304,8 @@ pub fn check_macos_global_magnetic_snapping(is_moving: bool) {
             if let Ok(mut sc) = SNAPPED_CENTER.lock() {
                 *sc = Some((tc_x, tc_y));
             }
-            CGWarpMouseCursorPosition(CGPoint { x: tc_x, y: tc_y });
+            crate::platform::get_system_controller().set_cursor_pos(tc_x as i32, tc_y as i32);
+            crate::indicator::update_indicator_position();
         } else {
             IS_SNAPPED.store(false, Ordering::SeqCst);
         }

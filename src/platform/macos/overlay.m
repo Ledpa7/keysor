@@ -6,6 +6,8 @@
 extern void keysor_macos_on_lang_toggle(void);
 extern double keysor_macos_on_speed_change(double delta);
 extern double keysor_macos_get_base_speed(void);
+extern double keysor_macos_get_max_speed(void);
+extern double keysor_macos_get_acceleration(void);
 extern bool keysor_macos_check_autostart_status(void);
 extern bool keysor_macos_on_autostart_toggle(void);
 extern bool keysor_macos_check_magnet_status(void);
@@ -133,6 +135,8 @@ extern bool keysor_macos_check_is_snapped(void);
 @interface KeysorHudView : NSView
 @property (nonatomic, assign) BOOL langIsEnglish;
 @property (nonatomic, assign) double baseSpeed;
+@property (nonatomic, assign) double maxSpeed;
+@property (nonatomic, assign) double accel;
 @property (nonatomic, assign) BOOL autoStartEnabled;
 @property (nonatomic, assign) BOOL magnetModeEnabled;
 @property (nonatomic, assign) BOOL gridModeEnabled;
@@ -432,8 +436,8 @@ static void drawMacToggleRow(NSRect rect, NSString *label, CGFloat animProgress,
         NSDictionary *detailAttrs = @{ NSFontAttributeName: detailFont, NSForegroundColorAttributeName: [NSColor whiteColor] };
 
         NSString *l1 = [NSString stringWithFormat:@"Base : %.1f", self.baseSpeed > 0 ? self.baseSpeed : 1.5];
-        NSString *l2 = @"Max  : 30.0";
-        NSString *l3 = @"Accel: 1.5x";
+        NSString *l2 = [NSString stringWithFormat:@"Max  : %.1f", self.maxSpeed > 0 ? self.maxSpeed : 30.0];
+        NSString *l3 = [NSString stringWithFormat:@"Accel: %.1fx", self.accel > 0 ? self.accel : 1.5];
 
         [l1 drawAtPoint:NSMakePoint(648, h - 108 - 13) withAttributes:detailAttrs];
         [l2 drawAtPoint:NSMakePoint(648, h - 125 - 13) withAttributes:detailAttrs];
@@ -533,8 +537,9 @@ static void drawMacToggleRow(NSRect rect, NSString *label, CGFloat animProgress,
 
 // SPEED SENS 패널 버튼 클릭 핸들러
 - (BOOL)handleSpeedPanelButtonClicks:(NSPoint)p contentHeight:(CGFloat)h {
-    // - 속도 감소 (0.1 미세 조절)
-    if (NSPointInRect(p, NSMakeRect(644, h - 162 - 28, 61, 28))) {
+    // - 속도 감소 (0.1 미세 조절, 터치/클릭 패딩 보정)
+    NSRect minusBtnRect = NSInsetRect(NSMakeRect(644, h - 162 - 28, 61, 28), -4, -4);
+    if (NSPointInRect(p, minusBtnRect)) {
         self.pressedButtonTag = 1;
         self.baseSpeed = keysor_macos_on_speed_change(-0.1);
         [self setNeedsDisplay:YES];
@@ -545,8 +550,9 @@ static void drawMacToggleRow(NSRect rect, NSString *label, CGFloat animProgress,
         return YES;
     }
 
-    // + 속도 증가 (0.1 미세 조절)
-    if (NSPointInRect(p, NSMakeRect(711, h - 162 - 28, 61, 28))) {
+    // + 속도 증가 (0.1 미세 조절, 터치/클릭 패딩 보정)
+    NSRect plusBtnRect = NSInsetRect(NSMakeRect(711, h - 162 - 28, 61, 28), -4, -4);
+    if (NSPointInRect(p, plusBtnRect)) {
         self.pressedButtonTag = 2;
         self.baseSpeed = keysor_macos_on_speed_change(0.1);
         [self setNeedsDisplay:YES];
@@ -671,6 +677,8 @@ void keysor_macos_show_hud(void) {
         if (g_hudWindow != nil) {
             if (g_hudView != nil) {
                 g_hudView.baseSpeed = keysor_macos_get_base_speed();
+                g_hudView.maxSpeed = keysor_macos_get_max_speed();
+                g_hudView.accel = keysor_macos_get_acceleration();
                 [g_hudView setNeedsDisplay:YES];
             }
             NSRect mainScreenFrame = [[NSScreen mainScreen] frame];
@@ -795,6 +803,8 @@ void keysor_macos_ui_init(void) {
 
         g_hudView = [[KeysorHudView alloc] initWithFrame:NSMakeRect(0, 0, 808.0, 452.0)];
         g_hudView.baseSpeed = keysor_macos_get_base_speed();
+        g_hudView.maxSpeed = keysor_macos_get_max_speed();
+        g_hudView.accel = keysor_macos_get_acceleration();
         g_hudView.langIsEnglish = NO;
         g_hudView.autoStartEnabled = keysor_macos_check_autostart_status();
         g_hudView.magnetModeEnabled = keysor_macos_check_magnet_status();

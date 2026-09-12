@@ -32,7 +32,33 @@ pub extern "C" fn keysor_macos_get_base_speed() -> f64 {
             return state.config.settings.base_speed;
         }
     }
-    1.5
+    let config_path = crate::config::get_config_path();
+    let cfg = crate::config::load_config(&config_path);
+    cfg.settings.base_speed
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn keysor_macos_get_max_speed() -> f64 {
+    if let Some(state_arc) = crate::hook::APP_STATE.get() {
+        if let Ok(state) = state_arc.lock() {
+            return state.config.settings.max_speed;
+        }
+    }
+    let config_path = crate::config::get_config_path();
+    let cfg = crate::config::load_config(&config_path);
+    cfg.settings.max_speed
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn keysor_macos_get_acceleration() -> f64 {
+    if let Some(state_arc) = crate::hook::APP_STATE.get() {
+        if let Ok(state) = state_arc.lock() {
+            return state.config.settings.acceleration;
+        }
+    }
+    let config_path = crate::config::get_config_path();
+    let cfg = crate::config::load_config(&config_path);
+    cfg.settings.acceleration
 }
 
 #[unsafe(no_mangle)]
@@ -87,10 +113,13 @@ pub extern "C" fn keysor_macos_check_is_snapped() -> bool {
 pub extern "C" fn keysor_macos_check_magnet_status() -> bool {
     if let Some(state_arc) = crate::hook::APP_STATE.get() {
         if let Ok(state) = state_arc.lock() {
-            return state.config.settings.magnetic_mode.unwrap_or(false);
+            return state.config.settings.magnetic_mode.unwrap_or(false)
+                || state.config.settings.global_magnetic_mode.unwrap_or(false);
         }
     }
-    false
+    let cfg = crate::config::load_config(&crate::config::get_config_path());
+    cfg.settings.magnetic_mode.unwrap_or(false)
+        || cfg.settings.global_magnetic_mode.unwrap_or(false)
 }
 
 #[unsafe(no_mangle)]
