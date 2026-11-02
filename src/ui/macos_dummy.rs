@@ -169,6 +169,20 @@ pub extern "C" fn keysor_macos_on_magnet_toggle() -> bool {
     new_status
 }
 
+static SHUTDOWN_ONCE: AtomicBool = AtomicBool::new(false);
+
+#[unsafe(no_mangle)]
+pub extern "C" fn keysor_macos_hook_status() -> i32 {
+    crate::platform::macos::hook_status() as i32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn keysor_macos_shutdown() {
+    if !SHUTDOWN_ONCE.swap(true, Ordering::SeqCst) {
+        crate::hook::cleanup_hook();
+    }
+}
+
 static IS_VISIBLE: AtomicBool = AtomicBool::new(false);
 
 pub struct MacosDummyUi;

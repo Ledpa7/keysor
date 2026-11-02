@@ -53,6 +53,7 @@ pub struct AppState {
     // 스페이스바 조작 제어용 상태
     pub space_press_time: Option<Instant>,
     pub is_space_down: bool,
+    pub space_scroll_combo: bool,
     pub is_right_down: bool,
     pub is_dragging: bool,
     pub space_tap_count: u32,
@@ -167,16 +168,41 @@ impl AppState {
     }
 
     /// 마우스 조작 모드를 비활성화하고 관련된 모든 상태(이동, 스크롤, 드래그)를 초기화합니다.
+    fn release_tracked_key(&mut self, vk: u32) {
+        self.active_movement_keys.remove(&vk);
+        self.active_scroll_keys.remove(&vk);
+        if self.active_movement_keys.is_empty() { self.movement_start_time = None; }
+        if self.active_scroll_keys.is_empty() { self.scroll_start_time = None; }
+        if self.vk_bindings.get(&vk).is_some_and(|a| a == "MouseRightClick") {
+            self.is_right_down = false;
+        }
+    }
+
+    fn begin_space_scroll_combo(&mut self) {
+        self.space_scroll_combo = true;
+        self.space_press_time = None;
+        self.space_tap_count = 0;
+        self.space_last_tap_time = None;
+        if self.is_dragging {
+            self.is_dragging = false;
+            execute_pending_action(PendingMouseAction::LeftUp);
+        }
+    }
+
     pub fn deactivate_mouse_mode(&mut self) {
         self.is_mouse_mode = false;
         self.is_space_down = false;
+        self.space_scroll_combo = false;
+        self.space_press_time = None;
+        self.space_tap_count = 0;
+        self.space_last_tap_time = None;
         self.is_right_down = false;
         self.active_movement_keys.clear();
         self.movement_start_time = None;
         self.active_scroll_keys.clear();
         self.scroll_start_time = None;
         if self.is_dragging {
-            get_system_controller().left_up();
+            execute_pending_action(PendingMouseAction::LeftUp);
             self.is_dragging = false;
         }
     }
@@ -192,7 +218,8 @@ impl AppState {
 
         // 설정 파일 변경을 통한 신규 라이선스 키 기입 시 실시간 백그라운드 재활성화
         if let Some(ref new_key) = new_config.settings.license_key {
-            if !new_key.trim().is_empty() && !crate::license::check_local_license() {
+            if self.config.settings.license_key != new_config.settings.license_key
+                && !new_key.trim().is_empty() && !crate::license::check_local_license() {
                 crate::license::start_auto_activation_worker(new_key.clone());
             }
         }
@@ -204,6 +231,8 @@ impl AppState {
             config::get_vk_bindings(&config::Config::default())
         };
 
+        self.deactivate_mouse_mode();
+        self.caps_lock_press_time = None;
         self.config = if features_enabled {
             new_config
         } else {
@@ -364,6 +393,7 @@ fn start_movement_thread(state_ptr: Arc<Mutex<AppState>>) {
         let mut last_tick = Instant::now();
         loop {
             thread::sleep(Duration::from_millis(interval_ms));
+            if STOPPING.load(Ordering::SeqCst) { break; }
 
             // 실제 프레임 경과 시간 측정 (최대 50ms로 클램핑하여 절전 해제 시 순간 이동 방지)
             let now = Instant::now();
@@ -429,12 +459,18 @@ fn start_movement_thread(state_ptr: Arc<Mutex<AppState>>) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PendingMouseAction {
     None,
+    LeftDown,
+    LeftUp,
     LeftClick,
     RightClick,
     ScrollUp,
     ScrollDown,
     ScrollLeft,
     ScrollRight,
+    PageJumpTop,
+    PageJumpBottom,
+    PageJumpLeft,
+    PageJumpRight,
     LeftDoubleClick,
     BrowserBack,
     BrowserForward,
@@ -446,8 +482,44 @@ enum PendingMouseAction {
 }
 
 /// 다양한 마우스 제어 액션 및 단축키 실행을 단일 창구로 모아 처리합니다.
+static STOPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(not(test))]
+fn output_sender() -> &'static std::sync::mpsc::Sender<(PendingMouseAction, Option<std::sync::mpsc::SyncSender<()>>)> {
+    static OUTPUT: OnceLock<std::sync::mpsc::Sender<(PendingMouseAction, Option<std::sync::mpsc::SyncSender<()>>)>> = OnceLock::new();
+    OUTPUT.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<(PendingMouseAction, Option<std::sync::mpsc::SyncSender<()>>) >();
+        thread::spawn(move || {
+            for (action, completed) in rx {
+                if !STOPPING.load(Ordering::SeqCst) || action == PendingMouseAction::LeftUp {
+                    execute_pending_action_now(action);
+                }
+                if let Some(completed) = completed { let _ = completed.send(()); }
+            }
+        });
+        tx
+    })
+}
+
+// Queue under AppState when ordering matters; OS injection runs after releasing its lock.
 fn execute_pending_action(action: PendingMouseAction) {
+    if action == PendingMouseAction::None { return; }
+    #[cfg(not(test))]
+    { let _ = output_sender().send((action, None)); }
+    #[cfg(test)]
+    TEST_ACTIONS.with(|actions| actions.borrow_mut().push(action));
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_ACTIONS: std::cell::RefCell<Vec<PendingMouseAction>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(not(test))]
+fn execute_pending_action_now(action: PendingMouseAction) {
     match action {
+        PendingMouseAction::LeftDown => get_system_controller().left_down(),
+        PendingMouseAction::LeftUp => get_system_controller().left_up(),
         PendingMouseAction::LeftClick => {
             get_system_controller().left_click();
             crate::indicator::trigger_click_motion(crate::indicator::ClickType::Left);
@@ -479,6 +551,10 @@ fn execute_pending_action(action: PendingMouseAction) {
             get_system_controller().scroll_horizontal(60);
             crate::indicator::trigger_click_motion(crate::indicator::ClickType::Scroll);
         }
+        PendingMouseAction::PageJumpTop => get_system_controller().simulate_page_jump(true),
+        PendingMouseAction::PageJumpBottom => get_system_controller().simulate_page_jump(false),
+        PendingMouseAction::PageJumpLeft => get_system_controller().scroll_horizontal(-10000),
+        PendingMouseAction::PageJumpRight => get_system_controller().scroll_horizontal(10000),
         PendingMouseAction::BrowserBack => get_system_controller().simulate_browser_navigation(false),
         PendingMouseAction::BrowserForward => get_system_controller().simulate_browser_navigation(true),
         PendingMouseAction::VirtualDesktopLeft => get_system_controller().simulate_virtual_desktop_navigation(false),
@@ -513,7 +589,8 @@ fn handle_space_release(state_ptr: Arc<Mutex<AppState>>) {
                         };
                         state.space_tap_count = 0;
                         state.space_last_tap_time = None;
-                        (true, action)
+                        execute_pending_action(action);
+                        (true, PendingMouseAction::None)
                     } else {
                         (false, PendingMouseAction::None)
                     }
@@ -532,9 +609,12 @@ fn handle_space_release(state_ptr: Arc<Mutex<AppState>>) {
 
 /// Caps Lock 관련 모드 전환 및 동기화 이벤트를 처리합니다.
 fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
-    if event.vk_code != VK_CAPITAL {
-        return None;
-    }
+    let state_arc = APP_STATE.get()?;
+    let configured_vk = {
+        let state = state_arc.lock().unwrap();
+        config::key_name_to_vk(&state.config.settings.modifier_key).unwrap_or(VK_CAPITAL)
+    };
+    if !matches_modifier(configured_vk, event.vk_code) { return None; }
 
     if event.is_injected_by_keysor {
         return Some(HookResult::Pass);
@@ -547,10 +627,7 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
         let is_toggle_mode = state.config.settings.modifier_mode.eq_ignore_ascii_case("Toggle");
 
         if event.is_keydown {
-            let should_process = match state.caps_lock_press_time {
-                None => true,
-                Some(t) => t.elapsed() > Duration::from_millis(150),
-            };
+            let should_process = begin_modifier_press(&mut state.caps_lock_press_time);
 
             if should_process {
                 state.caps_lock_press_time = Some(Instant::now());
@@ -559,18 +636,18 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
                     if state.is_mouse_mode {
                         println!("[Keysor] Caps Lock -> Mouse mode OFF (Toggle)");
                         state.deactivate_mouse_mode();
-                        get_system_controller().ensure_caps_lock_state(false);
+                        if configured_vk == VK_CAPITAL { get_system_controller().ensure_caps_lock_state(false); }
                         indicator_action = IndicatorAction::Hide;
                     } else {
                         println!("[Keysor] Caps Lock -> Mouse mode ON (Toggle)");
                         state.is_mouse_mode = true;
-                        get_system_controller().ensure_caps_lock_state(true);
+                        if configured_vk == VK_CAPITAL { get_system_controller().ensure_caps_lock_state(true); }
                         indicator_action = IndicatorAction::Show;
                     }
                 } else {
                     println!("[Keysor] Caps Lock -> Mouse mode ON (Hold)");
                     state.is_mouse_mode = true;
-                    get_system_controller().ensure_caps_lock_state(true);
+                    if configured_vk == VK_CAPITAL { get_system_controller().ensure_caps_lock_state(true); }
                     indicator_action = IndicatorAction::Show;
                 }
             }
@@ -580,7 +657,7 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
             if !is_toggle_mode {
                 println!("[Keysor] Caps Lock Released -> Mouse mode OFF (Hold)");
                 state.deactivate_mouse_mode();
-                get_system_controller().ensure_caps_lock_state(false);
+                if configured_vk == VK_CAPITAL { get_system_controller().ensure_caps_lock_state(false); }
                 indicator_action = IndicatorAction::Hide;
             }
         }
@@ -596,55 +673,89 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
 }
 
 /// 비동기 스페이스 드래그 홀드 임계값 감지 스레드를 기동합니다.
+fn begin_modifier_press(pressed: &mut Option<Instant>) -> bool {
+    if pressed.is_some() { return false; }
+    *pressed = Some(Instant::now());
+    true
+}
+
+fn matches_modifier(configured: u32, actual: u32) -> bool {
+    configured == actual || match configured {
+        0x10 => matches!(actual, 0xA0 | 0xA1),
+        0x11 => matches!(actual, 0xA2 | 0xA3),
+        0x12 => matches!(actual, 0xA4 | 0xA5),
+        _ => false,
+    }
+}
+
+fn start_drag_if_due(state: &mut AppState, hold_ms: u64) {
+    if state.is_mouse_mode && state.is_space_down && !state.space_scroll_combo && !state.is_dragging
+        && state.space_press_time.is_some_and(|t| t.elapsed() >= Duration::from_millis(hold_ms)) {
+        state.is_dragging = true;
+        state.space_tap_count = 0;
+        execute_pending_action(PendingMouseAction::LeftDown);
+    }
+}
+
 fn spawn_drag_detection_thread(state_arc: Arc<Mutex<AppState>>, hold_ms: u64) {
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(hold_ms));
 
-        let mut trigger_drag = false;
-        {
-            let mut s = state_arc.lock().unwrap();
-            if s.is_space_down && !s.is_dragging {
-                if let Some(press_t) = s.space_press_time {
-                    if press_t.elapsed() >= Duration::from_millis(hold_ms) {
-                        s.is_dragging = true;
-                        s.space_tap_count = 0;
-                        trigger_drag = true;
-                    }
-                }
-            }
-        }
-        if trigger_drag {
-            println!("[Debug] Space drag hold threshold reached. Triggering left_down()");
-            get_system_controller().left_down();
-        }
+        let mut state = state_arc.lock().unwrap();
+        start_drag_if_due(&mut state, hold_ms);
+
     });
 }
 
 /// 스페이스바를 활용한 좌클릭/더블클릭/드래그앤드롭 기능을 에뮬레이션합니다.
-fn handle_space_keydown(state: &mut AppState, state_arc: &Arc<Mutex<AppState>>) {
+fn page_jump_for_scroll(action: &str) -> PendingMouseAction {
+    match action {
+        "MouseScrollUp" => PendingMouseAction::PageJumpTop,
+        "MouseScrollDown" => PendingMouseAction::PageJumpBottom,
+        "MouseScrollLeft" => PendingMouseAction::PageJumpLeft,
+        "MouseScrollRight" => PendingMouseAction::PageJumpRight,
+        _ => PendingMouseAction::None,
+    }
+}
+
+fn handle_space_keydown(state: &mut AppState, state_arc: &Arc<Mutex<AppState>>) -> PendingMouseAction {
     if !state.is_space_down {
         state.is_space_down = true;
+        if !state.active_scroll_keys.is_empty() {
+            let jump = state.active_scroll_keys.iter()
+                .filter_map(|vk| state.vk_bindings.get(vk))
+                .map(|action| page_jump_for_scroll(action))
+                .find(|action| *action != PendingMouseAction::None)
+                .unwrap_or(PendingMouseAction::None);
+            state.begin_space_scroll_combo();
+            return jump;
+        }
         state.space_press_time = Some(Instant::now());
 
         let hold_ms = state.config.settings.drag_hold_threshold_ms;
         spawn_drag_detection_thread(Arc::clone(state_arc), hold_ms);
     }
+    PendingMouseAction::None
 }
 
 fn handle_space_keyup(
     state: &mut AppState,
     hold_ms: u64,
-    trigger_up: &mut bool,
     should_start_release_handler: &mut bool,
 ) {
     state.is_space_down = false;
-    let elapsed = state.space_press_time.map_or(Duration::ZERO, |t| t.elapsed());
+    if state.space_scroll_combo {
+        state.space_scroll_combo = false;
+        state.space_press_time = None;
+        return;
+    }
+    let elapsed = state.space_press_time.map(|t| t.elapsed());
     state.space_press_time = None;
 
     if state.is_dragging {
         state.is_dragging = false;
-        *trigger_up = true;
-    } else if elapsed < Duration::from_millis(hold_ms) {
+        execute_pending_action(PendingMouseAction::LeftUp);
+    } else if elapsed.is_some_and(|elapsed| elapsed < Duration::from_millis(hold_ms)) {
         state.space_tap_count += 1;
         state.space_last_tap_time = Some(Instant::now());
         if state.space_tap_count == 1 {
@@ -658,8 +769,8 @@ fn process_space_click(
     state_arc: &Arc<Mutex<AppState>>,
     event: &KeyEvent,
 ) -> HookResult {
-    let mut trigger_up = false;
     let mut should_start_release_handler = false;
+    let mut pending_action = PendingMouseAction::None;
 
     {
         let mut state = state_arc.lock().unwrap();
@@ -667,19 +778,15 @@ fn process_space_click(
 
         if event.is_keydown {
             println!("[Debug] Space Keydown: is_space_down={}, is_dragging={}", state.is_space_down, state.is_dragging);
-            handle_space_keydown(&mut state, state_arc);
+            pending_action = handle_space_keydown(&mut state, state_arc);
         } else if event.is_keyup {
             println!("[Debug] Space Keyup: space_tap_count={}, is_dragging={}", state.space_tap_count, state.is_dragging);
             let hold_ms = state.config.settings.drag_hold_threshold_ms;
-            handle_space_keyup(&mut state, hold_ms, &mut trigger_up, &mut should_start_release_handler);
+            handle_space_keyup(&mut state, hold_ms, &mut should_start_release_handler);
         }
     }
 
-    if trigger_up {
-        println!("[Debug] Space drag hold released. Triggering left_up()");
-        get_system_controller().left_up();
-    }
-
+    execute_pending_action(pending_action);
     if should_start_release_handler {
         handle_space_release(Arc::clone(state_arc));
     }
@@ -732,7 +839,7 @@ fn process_movement_and_actions(
     }
 
     // 일반 이동 및 보조 클릭 가로채기 매칭
-    if let Some(action) = state.vk_bindings.get(&vk_code) {
+    if let Some(action) = state.vk_bindings.get(&vk_code).cloned() {
         state.caps_lock_used_as_modifier = true;
         #[cfg(windows)]
         crate::ui::win_gdi::SUSPEND_CURSOR_HIDE.store(false, Ordering::SeqCst);
@@ -828,6 +935,13 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
     }
 
     if let Some(state_arc) = APP_STATE.get() {
+        let release_space = {
+            let mut state = state_arc.lock().unwrap();
+            if event.is_keyup { state.release_tracked_key(event.vk_code); }
+            event.is_keyup && event.vk_code == VK_SPACE && state.is_space_down
+        };
+        if release_space { return process_space_click(state_arc, &event); }
+
         let is_modifier_key = {
             let mut state = state_arc.lock().unwrap();
             if event.is_keydown {
@@ -860,6 +974,7 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
                     get_system_controller().ensure_caps_lock_off();
                     #[cfg(windows)]
                     crate::ui::win_gdi::force_restore_system_cursor();
+                    drop(state);
                     crate::hook::cleanup_hook();
                     std::process::exit(0);
                 }
@@ -933,60 +1048,6 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
                 return HookResult::Block;
             }
 
-            // Space + Scroll (R/F/Q/E) 단축키 조합을 통한 맨 위/아래/좌/우 Page Jump 처리
-            if event.vk_code == VK_SPACE && event.is_keydown {
-                let mut page_jump_action = None; // Some(0): Up, Some(1): Down, Some(2): Left, Some(3): Right
-                {
-                    let state = state_arc.lock().unwrap();
-                    for &vk in &state.active_scroll_keys {
-                        if let Some(action) = state.vk_bindings.get(&vk) {
-                            match action.as_str() {
-                                "MouseScrollUp" => {
-                                    page_jump_action = Some(0);
-                                    break;
-                                }
-                                "MouseScrollDown" => {
-                                    page_jump_action = Some(1);
-                                    break;
-                                }
-                                "MouseScrollLeft" => {
-                                    page_jump_action = Some(2);
-                                    break;
-                                }
-                                "MouseScrollRight" => {
-                                    page_jump_action = Some(3);
-                                    break;
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-                
-                if let Some(action_type) = page_jump_action {
-                    match action_type {
-                        0 => {
-                            println!("[Action] Space + Scroll Page Jump to Top");
-                            get_system_controller().simulate_page_jump(true);
-                        }
-                        1 => {
-                            println!("[Action] Space + Scroll Page Jump to Bottom");
-                            get_system_controller().simulate_page_jump(false);
-                        }
-                        2 => {
-                            println!("[Action] Space + Scroll Page Jump to Left");
-                            get_system_controller().scroll_horizontal(-10000);
-                        }
-                        3 => {
-                            println!("[Action] Space + Scroll Page Jump to Right");
-                            get_system_controller().scroll_horizontal(10000);
-                        }
-                        _ => {}
-                    }
-                    return HookResult::Block;
-                }
-            }
-
             let unified_space = {
                 let state = state_arc.lock().unwrap();
                 state.config.settings.unified_space_click
@@ -1010,7 +1071,7 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
 }
 
 /// 전역 키보드 훅 루프 시작 함수 (별도 독립 스레드에서 구동)
-pub fn start_hook(config: Config, is_pro: bool, is_trial: bool) {
+fn initial_state(config: Config, is_pro: bool, is_trial: bool) -> AppState {
     let features_enabled = is_pro || is_trial;
     let vk_bindings = if features_enabled {
         config::get_vk_bindings(&config)
@@ -1023,7 +1084,7 @@ pub fn start_hook(config: Config, is_pro: bool, is_trial: bool) {
     let win_pressed = false;
     let shift_pressed = false;
 
-    let state = Arc::new(Mutex::new(AppState {
+    AppState {
         config,
         vk_bindings,
         is_mouse_mode: false,
@@ -1033,6 +1094,7 @@ pub fn start_hook(config: Config, is_pro: bool, is_trial: bool) {
         caps_lock_used_as_modifier: false,
         space_press_time: None,
         is_space_down: false,
+        space_scroll_combo: false,
         is_right_down: false,
         is_dragging: false,
         space_tap_count: 0,
@@ -1046,7 +1108,11 @@ pub fn start_hook(config: Config, is_pro: bool, is_trial: bool) {
         win_pressed,
         shift_pressed,
         last_input_time: Instant::now(),
-    }));
+    }
+}
+
+pub fn start_hook(config: Config, is_pro: bool, is_trial: bool) -> Result<(), String> {
+    let state = Arc::new(Mutex::new(initial_state(config, is_pro, is_trial)));
 
     APP_STATE.set(Arc::clone(&state)).ok();
 
@@ -1064,15 +1130,20 @@ pub fn start_hook(config: Config, is_pro: bool, is_trial: bool) {
 
     // 2. OS 플랫폼 전역 키보드 훅 리스너 시작
     let hook = create_keyboard_hook();
-    if let Err(e) = hook.start_listening(Box::new(handle_keyboard_event)) {
-        eprintln!("[Error] Failed to start keyboard hook listener: {}", e);
-    } else {
-        KEYBOARD_HOOK.set(hook).ok();
-    }
+    hook.start_listening(Box::new(handle_keyboard_event))?;
+    KEYBOARD_HOOK.set(hook).ok();
+    Ok(())
 }
 
 /// 훅 자원을 OS에 안전하게 반환하는 페일세이프 해제 함수
 pub fn cleanup_hook() {
+    STOPPING.store(true, Ordering::SeqCst);
+    #[cfg(not(test))]
+    {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let _ = output_sender().send((PendingMouseAction::LeftUp, Some(tx)));
+        let _ = rx.recv_timeout(Duration::from_millis(500));
+    }
     if let Some(hook) = KEYBOARD_HOOK.get() {
         hook.stop_listening();
     }
@@ -1086,10 +1157,11 @@ pub fn cleanup_hook() {
     }
 }
 
-fn on_deactivate_global() {
+pub(crate) fn cancel_active_input() {
     if let Some(state_arc) = APP_STATE.get() {
         if let Ok(mut state) = state_arc.lock() {
             state.deactivate_mouse_mode();
+            state.caps_lock_press_time = None;
         }
         get_system_controller().ensure_caps_lock_off();
         crate::indicator::hide_indicator();
@@ -1104,8 +1176,164 @@ pub fn modifier_sync_guard() {
         };
         if is_mouse_mode && !is_toggle_mode {
             if let Some(hook) = KEYBOARD_HOOK.get() {
-                hook.modifier_sync_guard(is_mouse_mode, is_toggle_mode, on_deactivate_global);
+                hook.modifier_sync_guard(is_mouse_mode, is_toggle_mode, cancel_active_input);
             }
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn state() -> AppState {
+        let mut s = initial_state(Config::default(), true, false);
+        s.is_mouse_mode = true;
+        s
+    }
+    fn actions() -> Vec<PendingMouseAction> {
+        TEST_ACTIONS.with(|a| std::mem::take(&mut *a.borrow_mut()))
+    }
+    #[test]
+    fn movement_and_scroll_release_survive_shortcut_modifiers() {
+        let mut s = state();
+        process_movement_and_actions(&mut s, 0x57, true, false);
+        process_movement_and_actions(&mut s, 0x52, true, false);
+        s.ctrl_pressed = true;
+        s.release_tracked_key(0x57);
+        s.release_tracked_key(0x52);
+        assert!(s.get_movement_settings().is_none());
+        assert!(s.get_scroll_settings().is_none());
+    }
+    #[test]
+    fn drag_down_and_release_are_queued_in_order() {
+        let mut s = state();
+        s.is_space_down = true;
+        s.space_press_time = Some(Instant::now() - Duration::from_millis(300));
+        start_drag_if_due(&mut s, 250);
+        let mut release = false;
+        handle_space_keyup(&mut s, 250, &mut release);
+        assert_eq!(actions(), vec![PendingMouseAction::LeftDown, PendingMouseAction::LeftUp]);
+        assert!(!s.is_dragging);
+    }
+    #[test]
+    fn deactivation_cancels_pending_drag_and_click() {
+        let mut s = state();
+        s.is_space_down = true;
+        s.space_press_time = Some(Instant::now() - Duration::from_secs(1));
+        s.space_tap_count = 1;
+        s.deactivate_mouse_mode();
+        start_drag_if_due(&mut s, 250);
+        assert!(actions().is_empty());
+        assert_eq!(s.space_tap_count, 0);
+        assert!(s.space_press_time.is_none());
+    }
+    #[test]
+    fn configured_modifier_matches_generic_and_sided_keys() {
+        assert!(matches_modifier(0x10, 0xA0));
+        assert!(matches_modifier(0x11, 0xA3));
+        assert!(matches_modifier(0x41, 0x41));
+        assert!(!matches_modifier(0x41, VK_CAPITAL));
+    }
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn modifier_repeat_never_toggles_until_release() {
+        let mut pressed = None;
+        assert!(begin_modifier_press(&mut pressed));
+        pressed = Some(Instant::now() - Duration::from_secs(1));
+        assert!(!begin_modifier_press(&mut pressed));
+        pressed = None;
+        assert!(begin_modifier_press(&mut pressed));
+    }
+    #[test]
+    fn shift_or_ctrl_does_not_prevent_drag_release() {
+        let mut s = state();
+        s.is_space_down = true;
+        s.is_dragging = true;
+        s.ctrl_pressed = true;
+        s.shift_pressed = true;
+        let mut release = false;
+        handle_space_keyup(&mut s, 250, &mut release);
+        assert_eq!(actions(), vec![PendingMouseAction::LeftUp]);
+        assert!(!s.is_space_down);
+    }
+
+    #[test]
+    fn scroll_then_space_jumps_once_without_click_or_drag() {
+        let state_arc = Arc::new(Mutex::new(state()));
+        let mut s = state_arc.lock().unwrap();
+        let (_, initial) = process_movement_and_actions(&mut s, 0x52, true, false);
+        assert_eq!(initial, PendingMouseAction::ScrollUp);
+        assert_eq!(handle_space_keydown(&mut s, &state_arc), PendingMouseAction::PageJumpTop);
+        assert_eq!(handle_space_keydown(&mut s, &state_arc), PendingMouseAction::None);
+        assert!(s.space_press_time.is_none());
+        start_drag_if_due(&mut s, 250);
+        let mut release = false;
+        handle_space_keyup(&mut s, 250, &mut release);
+        assert!(!release);
+        assert_eq!(s.space_tap_count, 0);
+        assert!(!s.space_scroll_combo);
+        assert!(actions().is_empty());
+    }
+
+    #[test]
+    fn space_then_scroll_keeps_normal_click_after_scroll_keyup() {
+        let state_arc = Arc::new(Mutex::new(state()));
+        let mut s = state_arc.lock().unwrap();
+        assert_eq!(handle_space_keydown(&mut s, &state_arc), PendingMouseAction::None);
+        let (_, scroll) = process_movement_and_actions(&mut s, 0x46, true, false);
+        assert_eq!(scroll, PendingMouseAction::ScrollDown);
+        assert!(!s.space_scroll_combo);
+        let (_, repeat) = process_movement_and_actions(&mut s, 0x46, true, false);
+        assert_eq!(repeat, PendingMouseAction::None);
+        s.release_tracked_key(0x46);
+        assert!(s.get_scroll_settings().is_none());
+        let mut release = false;
+        handle_space_keyup(&mut s, 250, &mut release);
+        assert!(release);
+        assert_eq!(s.space_tap_count, 1);
+        assert!(actions().is_empty());
+    }
+
+    #[test]
+    fn scroll_after_space_preserves_existing_drag() {
+        let mut s = state();
+        s.is_space_down = true;
+        s.is_dragging = true;
+        let (_, pending) = process_movement_and_actions(&mut s, 0x52, true, false);
+        assert!(!s.space_scroll_combo);
+        assert!(s.is_dragging);
+        assert_eq!(pending, PendingMouseAction::ScrollUp);
+        assert!(actions().is_empty());
+        let mut release = false;
+        handle_space_keyup(&mut s, 250, &mut release);
+        assert!(!release);
+        assert_eq!(actions(), vec![PendingMouseAction::LeftUp]);
+    }
+
+    #[test]
+    fn horizontal_scroll_space_jumps_are_preserved() {
+        for (vk, expected) in [(0x51, PendingMouseAction::PageJumpLeft), (0x45, PendingMouseAction::PageJumpRight)] {
+            let state_arc = Arc::new(Mutex::new(state()));
+            let mut s = state_arc.lock().unwrap();
+            process_movement_and_actions(&mut s, vk, true, false);
+            assert_eq!(handle_space_keydown(&mut s, &state_arc), expected);
+            let mut release = false;
+            handle_space_keyup(&mut s, 250, &mut release);
+            assert!(!release);
+        }
+        assert!(actions().is_empty());
+    }
+
+    #[test]
+    fn space_without_scroll_still_counts_as_click() {
+        let mut s = state();
+        s.is_space_down = true;
+        s.space_press_time = Some(Instant::now());
+        let mut release = false;
+        handle_space_keyup(&mut s, 250, &mut release);
+        assert!(release);
+        assert_eq!(s.space_tap_count, 1);
+        assert!(actions().is_empty());
+    }
+
 }

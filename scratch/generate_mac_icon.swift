@@ -1,6 +1,6 @@
 import AppKit
 
-let projectDir = "/Volumes/scratch/14-Keysor"
+let projectDir = CommandLine.arguments.dropFirst().first ?? FileManager.default.currentDirectoryPath
 let pngPath = "\(projectDir)/public/logo.png"
 let svgPath = "\(projectDir)/public/logo.svg"
 let iconsetDir = "\(projectDir)/keysor.iconset"
@@ -107,11 +107,17 @@ print("Running iconutil to generate keysor.icns...")
 let process = Process()
 process.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
 process.arguments = ["-c", "icns", iconsetDir, "-o", icnsPath]
-try? process.run()
-process.waitUntilExit()
+do {
+    try process.run()
+    process.waitUntilExit()
+} catch {
+    print("Error: iconutil could not start: \(error)")
+    exit(1)
+}
 
-if fileManager.fileExists(atPath: icnsPath) {
+if process.terminationStatus == 0 && fileManager.fileExists(atPath: icnsPath) {
     print("SUCCESS! Created macOS app icon: \(icnsPath)")
 } else {
     print("Error: iconutil failed")
+    exit(1)
 }

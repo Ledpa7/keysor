@@ -4,7 +4,20 @@ fn main() {
         println!("cargo:rerun-if-changed=keysor.rc");
         println!("cargo:rerun-if-changed=keysor.manifest");
         println!("cargo:rerun-if-changed=keysor.ico");
-        embed_resource::compile("keysor.rc", embed_resource::NONE);
+        println!("cargo:rerun-if-changed=keysor-uiaccess.rc");
+        println!("cargo:rerun-if-changed=keysor-uiaccess.manifest");
+        println!("cargo:rerun-if-env-changed=KEYSOR_UIACCESS_BUILD");
+        println!("cargo:rerun-if-env-changed=KEYSOR_TEST_BUILD");
+        let test_build = std::env::var("KEYSOR_TEST_BUILD").as_deref() == Ok("1")
+            && std::env::var("PROFILE").as_deref() == Ok("debug");
+        if !test_build {
+            let resource = if std::env::var("KEYSOR_UIACCESS_BUILD").as_deref() == Ok("1") {
+                "keysor-uiaccess.rc"
+            } else {
+                "keysor.rc"
+            };
+            embed_resource::compile(resource, embed_resource::NONE);
+        }
     }
 
     #[cfg(target_os = "macos")]

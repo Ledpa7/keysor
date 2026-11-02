@@ -157,91 +157,86 @@ bindings:
         return default_cfg;
     }
 
-    match serde_yaml::from_str::<Config>(&content) {
+    match parse_config(&content) {
         Ok(cfg) => cfg,
-        Err(e) => {
-            eprintln!("[Warning] Config parse error: {}. Creating backup keysor.yaml.bak and restoring defaults.", e);
-            let bak_path = path.as_ref().with_extension("yaml.bak");
-            std::fs::copy(path.as_ref(), &bak_path).ok();
-
-            // 깨진 구문 자동 복구: 디폴트 얌 내용 재작성
-            let default_yaml = r#"# keysor.yaml - 키서 단축키 및 동작 설정 파일 (자동 복구됨)
-settings:
-  modifier_mode: "Toggle"        # "Hold" (Caps Lock을 누르는 동안에만 조작) 또는 "Toggle" (켜고 끄기)
-  modifier_key: "CapsLock"     # 활성화 단축키 (기본값 CapsLock)
-
-  base_speed: 1.5              # 마우스 시작 속도 (픽셀 단위)
-  max_speed: 30.0              # 마우스 최대 속도 (픽셀 단위)
-  acceleration: 1.5            # 누르고 있을 때의 가속도 비율
-
-  unified_space_click: true
-  double_click_threshold_ms: 280
-  drag_hold_threshold_ms: 250
-  refresh_rate_hz: 100         # 이동 주기 주사율 (기본값 100Hz)
-  magnetic_mode: false
-  global_magnetic_mode: false
-  magnetic_sensitivity: 1.3
-  lang_en: true
-  license_key: ""
-
-bindings:
-  - trigger: "W"
-    action: "MouseMoveUp"
-  - trigger: "S"
-    action: "MouseMoveDown"
-  - trigger: "A"
-    action: "MouseMoveLeft"
-  - trigger: "D"
-    action: "MouseMoveRight"
-  - trigger: "R"
-    action: "MouseScrollUp"
-  - trigger: "F"
-    action: "MouseScrollDown"
-  - trigger: "Q"
-    action: "MouseScrollLeft"
-  - trigger: "E"
-    action: "MouseScrollRight"
-  - trigger: "G"
-    action: "MouseRightClick"
-"#;
-            std::fs::write(path.as_ref(), default_yaml).ok();
-
-            // 경고 안내 출력
-            unsafe {
-                let err_msg = e.to_string();
-                let lang_en = default_cfg.settings.lang_en.unwrap_or(true);
-                let msg = if lang_en {
-                    format!("Warning: Failed to load config file (keysor.yaml) due to a parsing error.\n\nKeysor has backed up your broken file to 'keysor.yaml.bak' and restored a clean default configuration.\n\nError: {}", err_msg)
-                } else {
-                    format!("경고: 설정 파일(keysor.yaml) 문법 오류로 깨진 기존 파일이 'keysor.yaml.bak'으로 안전 백업되고 기본 설정으로 자동 복구되었습니다.\n\n상세 오류: {}", err_msg)
-                };
-                let title = if lang_en { "Keysor Config Auto-Recovered" } else { "Keysor 설정 자동 복구 완료" };
-                
-                #[cfg(windows)]
-                {
-                    let msg_wide: Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
-                    let title_wide: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
-                    windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
-                        0,
-                        msg_wide.as_ptr(),
-                        title_wide.as_ptr(),
-                        0x30,
-                    );
-                }
-                #[cfg(not(windows))]
-                eprintln!("[{}] {}", title, msg);
-            }
-            
+        Err(error) => {
+            eprintln!("[Config] {}. Keeping the file unchanged; using defaults at startup.", error);
             default_cfg
         }
     }
 }
 
-pub fn save_config(config: &Config) {
-    let path = get_config_path();
-    if let Ok(content) = serde_yaml::to_string(config) {
-        std::fs::write(path, content).ok();
+pub fn parse_config(content: &str) -> Result<Config, String> {
+    let cfg: Config = serde_yaml::from_str(content).map_err(|e| e.to_string())?;
+    let s = &cfg.settings;
+    if !s.modifier_mode.eq_ignore_ascii_case("Toggle") && !s.modifier_mode.eq_ignore_ascii_case("Hold") {
+        return Err("modifier_mode must be Toggle or Hold".into());
     }
+    if key_name_to_vk(&s.modifier_key).is_none() { return Err("Unsupported modifier_key".into()); }
+    if !s.base_speed.is_finite() || !s.max_speed.is_finite() || !s.acceleration.is_finite()
+        || s.base_speed <= 0.0 || s.max_speed < s.base_speed || s.acceleration < 0.0 {
+        return Err("Speeds must be finite: 0 < base_speed <= max_speed, acceleration >= 0".into());
+    }
+    if s.refresh_rate_hz.is_some_and(|hz| !(10..=1000).contains(&hz))
+        || !(1..=5000).contains(&s.double_click_threshold_ms)
+        || !(1..=5000).contains(&s.drag_hold_threshold_ms)
+        || s.magnetic_sensitivity.is_some_and(|v| !v.is_finite() || v <= 0.0) {
+        return Err("Invalid refresh rate, click delay, or magnetic sensitivity".into());
+    }
+    let mut keys = std::collections::HashSet::new();
+    for binding in &cfg.bindings {
+        let vk = key_name_to_vk(&binding.trigger).ok_or("Unsupported binding key")?;
+        if !keys.insert(vk) { return Err("Duplicate binding key".into()); }
+        if !matches!(binding.action.as_str(), "MouseMoveUp" | "MouseMoveDown" | "MouseMoveLeft"
+            | "MouseMoveRight" | "MouseScrollUp" | "MouseScrollDown" | "MouseScrollLeft"
+            | "MouseScrollRight" | "MouseLeftClick" | "MouseRightClick")
+            && !binding.action.strip_prefix("RunApp:").is_some_and(|path| !path.trim().is_empty()) {
+            return Err("Unsupported binding action".into());
+        }
+    }
+    Ok(cfg)
+}
+
+pub fn try_load_config(path: &Path) -> Result<Config, String> {
+    let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    parse_config(&content)
+}
+
+pub fn save_config(config: &Config) {
+    let result = serde_yaml::to_string(config).map_err(|e| e.to_string()).and_then(|content| {
+        parse_config(&content)?;
+        atomic_write(&get_config_path(), content.as_bytes()).map_err(|e| e.to_string())
+    });
+    if let Err(e) = result { eprintln!("[Config] Save failed: {}", e); }
+}
+
+pub(crate) fn atomic_write(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let temp = path.with_extension(format!("tmp-{}-{}", std::process::id(), SEQUENCE.fetch_add(1, Ordering::Relaxed)));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&temp)?;
+        file.write_all(data)?;
+        file.sync_all()?;
+        drop(file);
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            #[link(name = "kernel32")]
+            unsafe extern "system" { fn MoveFileExW(from: *const u16, to: *const u16, flags: u32) -> i32; }
+            let from: Vec<u16> = temp.as_os_str().encode_wide().chain(Some(0)).collect();
+            let to: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+            if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 0x1 | 0x8) } == 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+        #[cfg(not(windows))]
+        std::fs::rename(&temp, path)?;
+        Ok(())
+    })();
+    if result.is_err() { let _ = std::fs::remove_file(temp); }
+    result
 }
 
 /// 문자열로 된 키 이름을 Windows 가상 키 코드(VK Code)로 변환합니다.
@@ -289,4 +284,32 @@ pub fn get_vk_bindings(config: &Config) -> HashMap<u32, String> {
         }
     }
     map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn defaults_round_trip() {
+        assert!(parse_config(&serde_yaml::to_string(&Config::default()).unwrap()).is_ok());
+    }
+    #[test]
+    fn invalid_numeric_settings_are_rejected() {
+        for value in [f64::NAN, f64::INFINITY, -1.0, 0.0] {
+            let mut cfg = Config::default();
+            cfg.settings.base_speed = value;
+            assert!(parse_config(&serde_yaml::to_string(&cfg).unwrap()).is_err());
+        }
+    }
+    #[test]
+    fn malformed_reload_preserves_original_file() {
+        let path = std::env::temp_dir().join(format!("keysor-config-test-{}.yaml", std::process::id()));
+        let broken = "settings: [unfinished";
+        std::fs::write(&path, broken).unwrap();
+        assert!(try_load_config(&path).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), broken);
+        atomic_write(&path, b"replacement").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "replacement");
+        std::fs::remove_file(path).unwrap();
+    }
 }

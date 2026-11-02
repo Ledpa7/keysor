@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-11-02 Windows Shell Cursor Candidate
+
+- Fixed the hide-then-show contradiction: suspended overlays now return before `SWP_SHOWWINDOW` positioning. Removed repeated `BringWindowToTop` calls.
+- Start, Search and quick-settings surfaces permit the overlay only with an actual UIAccess process token. Secure/transition surfaces retain the native pointer fallback.
+- `show_indicator` requests UI-thread work instead of synchronously showing the overlay from the keyboard hook. Input mappings were not changed in this update.
+- Opt-in build: `$env:KEYSOR_UIACCESS_BUILD='1'; cargo build --release --bin keysor --offline --target-dir target/uiaccess-build`. Default manifest is unchanged.
+- Verified: 19 unit tests passed; release build succeeded; extracted PE manifest contains `asInvoker`, `uiAccess=true`. Compiler warnings remain.
+- `scripts/install-uiaccess-candidate.ps1` uses the existing trusted certificate and a new versioned Program Files folder; it does not change trust/UAC policy, terminate Keysor, overwrite old releases, or alter shortcuts.
+- Runtime probe: installed executable with `--diagnose-uiaccess <output.json>` exits without starting input hooks, UI, watchdog, or single-instance handling. Require `ui_access: true` before shortcut promotion.
+- Installed and signature verified: `C:\Program Files\Keysor\uiaccess-9793465b6de0\keysor.exe`. SHA256: `F612C83CE0ECFED69AB319100579D7ED4AD49D87F672CD6886E4CCA34DC58D3D`.
+- Runtime diagnostic confirmed `ui_access: true`, `input_hook_started: false`; evidence: `target/uiaccess-token-verified.json`, `target/uiaccess-install.json`.
+- Existing desktop `keysor.lnk` now targets the installed candidate. Original shortcut backup: `target/keysor-shortcut-before-uiaccess-20261102-112151.lnk`; prior target: `target/hud-async-build/release/keysor.exe`. Existing processes were NOT restarted. Exit Keysor fully and use the same desktop shortcut to apply. To roll back, exit the candidate and restore the backed-up shortcut to the desktop.
+- Actual Start/search/quick-settings z-order, normal typing, CapsLock and Alt+Tab require interactive testing; unit tests and the hook-free token probe do not establish those results. Earlier dashboard success claims are not runtime evidence for this candidate.
+
 ## 📊 프로젝트 개요 (Overview)
 
 | 구분 | 사양 및 상태 | 세부 특징 |
@@ -76,6 +90,10 @@
     - **실패 원인**: 숨겨진 HWND 오버레이 창이 매 프레임 `BringWindowToTop`과 `SetWindowPos`를 실행하면서 DWM 렌더링 포커스를 건드려 OS Snap Layout 팝업창을 즉시 닫아버리는 문제 유발.
     - **필수 지침**: `is_suspended == true` 일 때는 HWND 오버레이 이동(`update_overlay_window_position`)을 반드시 생략하고 OS 레벨 커서 주입으로만 정밀 처리할 것.
 
+19. **동일 실행 바이너리(`keysor.exe --watchdog`)로 디펜더 사살 감시 워치독을 구현하려던 시도 (실패)**
+    - **실패 원인**: 윈도우 디펜더가 `keysor.exe`를 감지하여 차단/사살(Kill)할 때, 프로세스 ID 기준이 아니라 실행 파일 바이너리 기준으로 구동 중인 모든 프로세스를 한꺼번에 강제 종료함. 부모 `keysor.exe`가 죽는 순간 자식 워치독 `keysor.exe --watchdog`도 동시에 커널 레벨(`NtTerminateProcess`)로 사살되어 복구 코드가 실행될 수 없음. 또한 디펜더가 프로세스를 죽이지 않고 키보드 훅(`WH_KEYBOARD_LL`)만 차단한 경우 프로세스가 살아있어 워치독이 영원히 깨어나지 못하고 커서가 투명 상태로 멈춤.
+    - **필수 지침**: 디펜더 사살에 대응하기 위한 워치독은 디펜더가 사살하지 않는 Windows OS 네이티브 신뢰 프로세스(`powershell.exe`) 기반으로 독립 가동하고, 복구 시 반드시 `SPIF_UPDATEINIFILE` 및 마우스 미세 넛지(`mouse_event`)를 동반할 것.
+
 ---
 
 ## 🚀 시작 메뉴 Z-order 정복 계획 (UIAccess & 코드 서명 로드맵)
@@ -89,7 +107,19 @@
   - **Program Files 배포**: OS 커널 `uiAccess="true"` 특권 승인 조건인 `C:\Program Files\Keysor\keysor.exe` 경로 배포 및 바탕화면 바로가기(`keysor.lnk`) 타깃 동기화 완료.
   - **최상위 DWM 렌더링 밴드 승인**: 윈도우 11 DWM으로부터 시작 메뉴(`ZBID_IMMERSIVE_LAUNCHER`)보다 더 높은 전역 최상위 렌더링 밴드(`ZBID_UIACCESS`)를 승인받아, 시작 메뉴 픽셀 최상단 위에서 100% 가려짐 0%로 선명하게 표출 및 작동을 달성했습니다.
 
-## 📅 최신 패치 및 수정 내역 (Latest Updates - 2026-08-28)
+## 📅 최신 패치 및 수정 내역 (Latest Updates - 2026-09-30)
+
+- **[x] 윈도우 디펜더 개입 및 비정상 사망 대응 불사(Immortal) 워치독 구축 & DWM 커서 하드웨어 갱신 보장**:
+  - **원인 분석**:
+    1. **프로세스 미종료로 인한 워치독 트리거 불발**: 윈도우 디펜더가 저수준 키보드 훅(`WH_KEYBOARD_LL`)만 차단/격리하고 `keysor.exe` 프로세스를 즉시 종료하지 않았을 때, 워치독의 `WaitForSingleObject(h_process)`는 부모가 여전히 살아있다고 판단하여 깨어나지 못함. 이로 인해 마우스 모드 진입 시 입혀진 투명 커서(`blank`)가 영구 고착되는 치명적 버그 확인.
+    2. **동일 바이너리(`keysor.exe`) 워치독의 동시 사살**: 디펜더가 위협 제거(Remediation Kill)를 집행할 때는 단일 PID가 아닌 바이너리 이미지 경로 기준으로 모든 인스턴스를 동시 사살하므로, 부모 `keysor.exe`와 자식 `keysor.exe --watchdog`가 동시에 죽어 복구 코드가 실행될 수 없음.
+    3. **`SPI_SETCURSORS`의 하드웨어 커서 비트맵 미갱신 (DASHBOARD 3번 이슈 재발)**: `SystemParametersInfoW(SPI_SETCURSORS)` 단독 호출 시 내부 설정만 갱신될 뿐, 물리 마우스 이벤트나 DWM 무효화 신호가 없으면 하드웨어 커서 비트맵이 다시 그려지지 않고 투명 상태를 유지함.
+  - **수정 상세 내역**:
+    1. `src/main.rs` [MODIFY]: 디펜더가 사살할 수 없는 Windows OS 네이티브 `powershell.exe` 기반 독립 워치독을 백그라운드(`CREATE_NO_WINDOW | DETACHED_PROCESS`)로 동시 가동. Microsoft 서명된 OS 프로세스이므로 디펜더가 `keysor.exe`를 격리/사살하더라도 워치독은 유지되며, 부모 PID 사망 감지 즉시 Win32 API를 직접 호출해 100% 커서를 복원함.
+    2. `src/main.rs`, `src/ui/win_gdi.rs` [MODIFY]: `restore_windows_system_cursor()` 및 `force_restore_system_cursor()`에 `SPIF_UPDATEINIFILE` 플래그 및 마우스 0px 미세 넛지(`mouse_event(MOUSEEVENTF_MOVE, 0, 0, 0, 0)`) 펄스를 추가하여 윈도우 DWM/디스플레이 드라이버가 즉각 하드웨어 커서 비트맵을 다시 그리도록 보장.
+    3. `cargo build --release` [BUILD]: 파일 락 프로세스 해제 후 최신 릴리즈 바이너리(`target/release/keysor.exe`) 정상 빌드 완료.
+
+## 📅 이전 패치 및 수정 내역 (Previous Updates - 2026-08-28)
 
 - **[x] Windows OS 1ms 고정밀 타이머 & 프레임레이트 독립적 이동 델타(`dt`) 정규화**:
   - `src/hook.rs` [MODIFY]: `start_hook` 및 `cleanup_hook`에 `timeBeginPeriod(1)` / `timeEndPeriod(1)`을 연동하여 백그라운드 앱 실행 여부와 관계없이 항상 100Hz 루프가 정확한 10ms 주기로 실행되도록 보장했습니다.
@@ -543,3 +573,16 @@ graph TD
 > 3. 향후 홈페이지의 모던 다크 테마 디자인과 함께 윈도우 인스톨러 배포, Tauri GUI 제어판 연결 등을 이어서 추진할 예정입니다.
 > 4. **[보류/메모]** 향후 서비스 고도화 및 스케일업 시점에 **Supabase를 연동하여 기기별 UUID 매핑 통제, 사용자 이메일 계정 기반의 구매자 포털 구축, 원격 공지사항 연동**을 설계 및 반영할 예정입니다. (현재 1.0 초기 버전은 Lemon Squeezy의 기본 관리자/조회 인프라만 활용하여 유지보수성을 극대화함.)
 
+
+
+## 2026-10-10 Stability handoff
+See [WINDOWS_FIXES_MAC_HANDOFF.md](WINDOWS_FIXES_MAC_HANDOFF.md) for current common/Windows/macOS code changes, verification evidence, and the remaining Mac device test. Historical completion claims above are not current verification results.
+
+## 2026-10-17 Space + 스크롤 입력 순서 / macOS 적용
+
+- 공통 `src/hook.rs`: R 또는 F를 먼저 누르고 Space를 누르면 맨 위/아래 페이지 점프를 한 번 실행한다. R/F를 먼저 떼더라도 해당 Space를 클릭·드래그로 처리하지 않는다. Space 키 반복 입력으로 점프가 재실행되지 않는다.
+- Space를 먼저 누른 뒤 R/F를 누르면 기존 Space 클릭·드래그와 R/F 일반 스크롤을 유지한다. Q/E를 먼저 누른 뒤 Space를 누르는 가로 점프도 유지한다.
+- macOS EventTap의 R/F/Space 자동 반복 이벤트를 공통 처리기로 보내 마우스 모드 중 문자 입력이 새지 않게 했다. 다른 키의 반복 이벤트 정책은 그대로다.
+- macOS `simulate_page_jump`를 고정량 휠 스크롤에서 Command+Up/Down 합성 입력으로 바꿨다. 이는 [Apple의 문서 시작/끝 단축키](https://support.apple.com/en-us/102650)를 따르지만, 대상 앱별 실제 동작은 Mac에서 확인해야 한다.
+- Windows 검증: `scripts/test-windows.ps1`의 테스트 16개 통과, `cargo build --release --offline` 성공. 표준 `target/release/keysor.exe`를 새로 빌드했고 기존 바탕화면 바로가기도 이 파일을 가리키도록 확인했다. 검증 당시 실행 중인 프로세스는 이전 별도 빌드(`target/scroll-boost-build/release/keysor.exe`)에서 시작했으므로 표준 파일을 실행하려면 앱을 완전히 종료한 뒤 바로가기로 재시작해야 한다.
+- macOS 검증 경계: Windows에서 변경된 Rust 파일 2개의 구문 검사는 통과했다. `cargo check --target x86_64-apple-darwin --offline`은 Apple용 C 컴파일러 `cc`가 없어 의존성 빌드 단계에서 중단됐으므로 Mac 앱 빌드와 실기기 동작은 미검증이다. Mac에서 `cargo test --bin keysor` 실행 후 `bash scratch/package_mac_app.sh`로 앱을 빌드한다. Accessibility/Input Monitoring 권한을 확인하고 R/F -> Space(점프 1회·클릭/드래그 없음), Space -> R/F(일반 클릭/드래그/스크롤), R/F를 먼저 뗀 뒤 Space 해제, 길게 누르기/자동 반복, Q/E -> Space를 직접 시험한다. Windows 빌드는 Mac EventTap 및 앱 동작을 검증하지 않는다.

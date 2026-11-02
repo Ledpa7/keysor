@@ -300,8 +300,8 @@ impl SystemController for MacosSystemController {
     }
 
     fn simulate_page_jump(&self, top: bool) {
-        let amount = if top { 1000 } else { -1000 };
-        self.scroll(amount);
+        // Command+Up/Down moves to the beginning/end in standard macOS document views.
+        self.post_key_event(if top { 126 } else { 125 }, 0x00100000);
     }
 
     fn simulate_tab_navigation(&self, forward: bool) {

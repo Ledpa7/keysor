@@ -15,6 +15,8 @@ extern bool keysor_macos_on_magnet_toggle(void);
 extern bool keysor_macos_check_grid_status(void);
 extern bool keysor_macos_on_grid_toggle(void);
 extern bool keysor_macos_check_is_snapped(void);
+extern int keysor_macos_hook_status(void);
+extern void keysor_macos_shutdown(void);
 
 @interface KeysorCursorView : NSView
 @property (nonatomic, assign) int cursorState;
@@ -487,6 +489,16 @@ static void drawMacToggleRow(NSRect rect, NSString *label, CGFloat animProgress,
     [info1 drawAtPoint:NSMakePoint(30, h - 365 - 14) withAttributes:infoAttrs];
     [info2 drawAtPoint:NSMakePoint(30, h - 388 - 14) withAttributes:infoAttrs];
     [info3 drawAtPoint:NSMakePoint(30, h - 411 - 14) withAttributes:infoAttrs];
+
+    int hookStatus = keysor_macos_hook_status();
+    if (hookStatus != 2) {
+        NSString *message = hookStatus == 1
+            ? (self.langIsEnglish ? @"Accessibility permission required" : @"손쉬운 사용 권한이 필요합니다")
+            : hookStatus == 4
+                ? (self.langIsEnglish ? @"Keyboard unavailable: check Input Monitoring" : @"키보드 입력 불가: 입력 모니터링 권한을 확인하세요")
+                : (self.langIsEnglish ? @"Keyboard hook reconnecting" : @"키보드 연결을 복구하는 중입니다");
+        [message drawAtPoint:NSMakePoint(30, 7) withAttributes:infoAttrs];
+    }
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
@@ -522,6 +534,7 @@ static void drawMacToggleRow(NSRect rect, NSString *label, CGFloat animProgress,
     // 닫기 버튼
     if (NSPointInRect(p, NSMakeRect(772, h - 10 - 20, 24, 20))) {
         NSLog(@"[Keysor ObjC] HUD Close X button clicked, exiting Keysor...");
+        keysor_macos_shutdown();
         exit(0);
         return YES;
     }
@@ -717,12 +730,14 @@ void keysor_macos_post_show_hud_notification(void) {
 
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
     NSLog(@"[Keysor ObjC] applicationShouldTerminate called, exiting process...");
+    keysor_macos_shutdown();
     exit(0);
     return NSTerminateNow;
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
     NSLog(@"[Keysor ObjC] applicationWillTerminate called, exiting process...");
+    keysor_macos_shutdown();
     exit(0);
 }
 
@@ -732,6 +747,12 @@ static KeysorAppDelegate *g_appDelegate = nil;
 
 void keysor_macos_pump_events(void) {
     @autoreleasepool {
+        static int lastHookStatus = -1;
+        int currentHookStatus = keysor_macos_hook_status();
+        if (lastHookStatus != currentHookStatus) {
+            lastHookStatus = currentHookStatus;
+            [g_hudView setNeedsDisplay:YES];
+        }
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.001, false);
         NSEvent *event;
         while ((event = [NSApp nextEventMatchingMask:NSEventMaskAny

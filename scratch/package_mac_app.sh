@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-PROJECT_DIR="/Volumes/scratch/14-Keysor"
-DESKTOP_APP="/Users/jidu/Desktop/Keysor.app"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DESKTOP_APP="$HOME/Desktop/Keysor.app"
 TARGET_APP="$PROJECT_DIR/target/release/Keysor.app"
 
 echo "1. Building release binary with CARGO_INCREMENTAL=0..."
@@ -10,7 +10,7 @@ cd "$PROJECT_DIR"
 CARGO_INCREMENTAL=0 cargo build --release
 
 echo "2. Ensuring keysor.icns is up to date..."
-swift "$PROJECT_DIR/scratch/generate_mac_icon.swift"
+swift "$PROJECT_DIR/scratch/generate_mac_icon.swift" "$PROJECT_DIR"
 
 function package_app() {
     local APP_PATH="$1"
@@ -64,6 +64,5 @@ echo "3. Refreshing macOS Finder Icon Cache..."
 if [ -d "$DESKTOP_APP" ]; then
     /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$DESKTOP_APP" || true
 fi
-killall Finder || true
 
 echo "SUCCESS! Keysor.app successfully bundled with keysor.icns and Finder cache refreshed!"

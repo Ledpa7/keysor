@@ -85,6 +85,7 @@ impl KeyboardHook for WindowsKeyboardHook {
         HOOK_CALLBACK.set(callback)
             .map_err(|_| "KeyboardHook callback has already been registered".to_string())?;
 
+        let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
         thread::spawn(move || unsafe {
             let instance = windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null());
             let hook = SetWindowsHookExW(
@@ -95,11 +96,12 @@ impl KeyboardHook for WindowsKeyboardHook {
             );
 
             if hook == 0 {
-                eprintln!("[Error] Failed to install WH_KEYBOARD_LL low-level keyboard hook.");
+                let _ = ready_tx.send(Err(format!("WH_KEYBOARD_LL installation failed: {}", std::io::Error::last_os_error())));
                 return;
             }
 
             H_HOOK.set(std::sync::Mutex::new(hook)).ok();
+            let _ = ready_tx.send(Ok(()));
             #[cfg(debug_assertions)]
             println!("[Hook Debug] SetWindowsHookExW success. hook={}", hook);
 
@@ -110,7 +112,7 @@ impl KeyboardHook for WindowsKeyboardHook {
             }
         });
 
-        Ok(())
+        ready_rx.recv().map_err(|_| "Keyboard hook thread stopped during startup".to_string())?
     }
 
     fn stop_listening(&self) {
@@ -127,7 +129,10 @@ impl KeyboardHook for WindowsKeyboardHook {
     fn modifier_sync_guard(&self, is_mouse_mode: bool, is_toggle_mode: bool, on_deactivate: fn()) {
         if is_mouse_mode && !is_toggle_mode {
             unsafe {
-                let phys_state = GetAsyncKeyState(VK_CAPITAL as i32);
+                let modifier = crate::hook::APP_STATE.get().and_then(|s| {
+                    s.lock().ok().and_then(|s| crate::config::key_name_to_vk(&s.config.settings.modifier_key))
+                }).unwrap_or(VK_CAPITAL as u32);
+                let phys_state = GetAsyncKeyState(modifier as i32);
                 if (phys_state as u16 & 0x8000) == 0 {
                     on_deactivate();
                 }
