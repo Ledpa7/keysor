@@ -4,6 +4,96 @@
 
 ---
 
+## 2026-11-03 Independent Cursor Guardian Candidate
+
+- Replaced the unverified encoded-PowerShell and same-name-only watchdog startup path with `src/watchdog.rs`. The packaged `keysor-guardian.exe` is a separate process name, so stopping `keysor.exe` by image name does not target the guardian. Startup writes `.keysor/watchdog-startup.json` with guardian PID, independence, and readiness; after parent exit it writes `.keysor/watchdog-<parent-pid>.json` with wait and cursor-reload results.
+- The cursor reload now returns the Windows API result and does not write cursor settings back to the user profile. Manual `--restore` exits nonzero on failure. If the independent companion is absent or fails readiness, startup attempts a same-executable fallback and records that it is not independent.
+- Isolated forced-exit test passed without stopping the live Keysor: a disposable PowerShell parent was force-stopped; `keysor-guardian.exe` reported `ready=true`, `wait_result=0`, and `restore_ok=true` in `target/watchdog-test/watchdog-probe-20261103014650431.json`.
+- Final source: 24 tests passed, unsigned standard release build succeeded. Candidate pair in `target/watchdog-final-candidate/` has SHA256 `1886AB4398F0A401FCBF92FFA9CD9800F9E300E36C7DA7E1CD3998F3C712C9DF` for each executable. Inno Setup candidate in `target/watchdog-setup-candidate/Keysor-Setup-1.0.1.exe` includes both files and is unsigned.
+- 2026-11-03 in-place deployment: backed up the previous installed executable to `target/keysor-before-watchdog-in-place.exe` (SHA256 `890E66DF90234BD031C41B6798107D8E737BB792B7B47849245ACBAEF287E7B1`), then replaced `C:\Program Files\Keysor\suppressed-shell-890e66df9023\keysor.exe` and installed `keysor-guardian.exe` alongside it. Both installed files match candidate SHA256 `1886AB4398F0A401FCBF92FFA9CD9800F9E300E36C7DA7E1CD3998F3C712C9DF`. The desktop shortcut retains its existing target and arguments. Runtime inspection found the main and guardian processes in that folder; `.keysor/watchdog-startup.json` reported matching parent/guardian PIDs, `independent=true`, and `ready=true`. Live force-kill verification on 2026-11-03: main PID `50896` was force-stopped; guardian PID `8336` exited after recording `ready=true`, `wait_result=0`, and `restore_ok=true` in `.keysor/watchdog-50896.json`. The test restarted Keysor as PID `49836` with guardian PID `39376`; both process paths matched the installed folder, and startup reported `independent=true`, `ready=true`. The Windows API reported cursor restoration success; actual visual cursor state was not independently observed. Result: `target/watchdog-live-kill-result.json`. Public `dist` was not overwritten.
+- Post-test cleanup caveat: cancelling the PowerShell `Start-Process -Wait` wrapper also terminated the restarted Keysor process tree (main PID `49836` and guardian PID `39376`); that second shutdown produced no guardian restore-complete report. A direct `SPI_SETCURSORS` call returned true, and Keysor was restarted again as main PID `25552` with independent guardian PID `35560`, both alive and reporting `ready=true`. Do not use `Start-Process -Wait` or Ctrl+C for future live Keysor verification; the first isolated main-only force-kill result above remains the verified recovery case.
+- The earlier UAC-stalled candidate-folder attempt was superseded by the in-place deployment above. `target/install-watchdog-in-place.ps1` performed the guarded backup, replacement, launch, and readiness check; its result is in `target/watchdog-in-place-result.json`. Git tracks source changes, not the installed executable backup.
+
+## 2026-11-03 Native Cursor On System Panels
+
+- Local user test: Windows native cursor is visible on system panels, but native and Keysor overlay cursors overlap in ordinary windows. This supersedes the earlier remote-only assumption that native fallback might be invisible.
+- Source now always hides the Keysor overlay on Start/Search/Shell/ControlCenter/Task Manager/XAML system panels and leaves the native pointer visible there, regardless of `GetCursorInfo` flags. Secure and desktop-switching surfaces still use native fallback.
+- 23 Windows tests passed and the unsigned standard release build succeeded. This build is not installed or promoted to `dist`; the running executable remains the previously installed unsigned candidate until an interactive restart.
+- Ordinary windows still show both cursors because `hide_system_cursor()` deliberately preserves the native pointer. `ShowCursor` is per-thread and `SetCursor` is reliable only while owning mouse input; neither safely hides another app's pointer. Do not reintroduce transparent `SetSystemCursor`: prior attempts left the OS cursor invisible, especially over system UI and remote desktop. A single-cursor ordinary-window design needs a different, separately validated rendering approach or an explicit tradeoff.
+
+## 2026-11-03 Start Menu Cursor Follow-Up
+
+- Confirmed running PIDs 46612/49904 use the unsigned `suppressed-shell-890e66df9023` build. The user's report concerns this build, not the older shortcut target.
+- Its opt-in diagnostic recorded `searchhost.exe` / `Windows.UI.Core.CoreWindow`, mouse mode ON, `native_fallback=true`, and `overlay_visible=false` while the user reported an invisible pointer. The trace reported `cursor_flags=1` and a non-null handle in that session, so the earlier suppressed-cursor-only exception did not apply.
+- Changed ordinary Start/Search/system panels to keep the Keysor overlay enabled regardless of native cursor flags. Secure and desktop-switching surfaces retain native fallback. This may still be obscured by the Windows shell window band; actual visibility requires a remote visual test.
+- 23 Windows tests passed with `KEYSOR_TEST_BUILD=1`; unsigned standard release build succeeded. Isolated candidate: `target/shell-overlay-candidate/keysor.exe`, SHA256 `2D50B6E2A77C76727740EC660AC812D9B6625AF160F30A8EB49043E2779EBC6E`.
+- Candidate installation/restart is pending Windows UAC confirmation. At this point the desktop shortcut and running PIDs still use the previous unsigned `suppressed-shell-890e66df9023` build. Do not claim the new candidate fixes Start or publish it until tested.
+
+## 2026-11-03 Suppressed Cursor Shell Candidate
+
+- User reconfirmed that the unsigned standard build still loses the cursor on system panels while connected from another PC through Chrome Remote Desktop.
+- In the existing trace, Start (`searchhost.exe`) triggered native-pointer fallback and hid the Keysor overlay while Windows reported `CURSOR_SUPPRESSED` and a null cursor handle. Chromium's Windows cursor capture also transmits an empty cursor image for this state.
+- Candidate change: ordinary shell panels keep the Keysor overlay when the native cursor is reported suppressed. The previous shell fallback remains for other cursor states; UAC/secure-transition surfaces still use the native fallback. This may still be hidden behind the shell's window band and requires a live visual test.
+- 23 tests passed; unsigned release executable built at `target/suppressed-shell-candidate/keysor.exe` with SHA256 `890E66DF90234BD031C41B6798107D8E737BB792B7B47849245ACBAEF287E7B1`. The separate Program Files install could not complete because Windows administrator confirmation stalled in the remote session. The desktop shortcut, running process, and public `dist` files remain on the previous unsigned build.
+- The existing proprietary EULA does not satisfy SignPath Foundation's OSI-license requirement for its free open-source signing program. Do not treat local self-signed UIAccess as a public release path.
+
+## 2026-11-03 Unsigned Build Restart
+
+- The desktop shortcut targets `C:\Program Files\Keysor\shell-cursor-89d27b65a58f\keysor.exe` with `--chrome-remote` only. Its signature is `NotSigned` and SHA256 is `89D27B65A58F27CC7FE7AE5B7C6A9FD6B815F21669B371264FA7A0992830CE7A`.
+- Stopped the previous local UIAccess processes (PIDs 43148/50344) and launched the desktop shortcut. New PIDs 26192/53424 both report the unsigned standard executable path through `QueryFullProcessImageNameW`.
+- Process/path verification does not prove Start-menu cursor visibility. The Chrome Remote Desktop `CURSOR_SUPPRESSED` case remains unresolved in the unsigned build.
+
+## 2026-11-02 System Panel Cursor Follow-Up
+
+- User verified that first CapsLock activation and magnet mode now work. The cursor still disappears behind Windows system panels during Chrome Remote Desktop use.
+- The earlier 120-second trace recorded mouse mode ON and the overlay visible, but only a foreground window handle. It cannot identify which panel was foreground or whether native-pointer fallback ran. `GetCursorInfo` reporting a visible cursor does not prove the remote client rendered it.
+- The opt-in `--diagnose-input` trace now records the foreground process name, window class, and whether that process should use native-pointer fallback, without window titles or typed text. Capture lasts five minutes after launch. This is diagnostic only; it does not claim to solve the cursor issue.
+- 23 tests and the unsigned Windows package build passed. The isolated candidate is `C:\Program Files\Keysor\shell-cursor-89d27b65a58f\keysor.exe` (SHA256 `89D27B65A58F27CC7FE7AE5B7C6A9FD6B815F21669B371264FA7A0992830CE7A`). The prior magnet candidate remains installed for rollback.
+- User reproduced the invisible cursor in Start. The new trace recorded `searchhost.exe` / `Windows.UI.Core.CoreWindow`, `native_fallback=true`, `overlay_visible=false`, and `CURSOR_SUPPRESSED` (`cursor_flags=2`, null handle). Thus the standard build hides its overlay on Start while Windows is not drawing a native pointer. Previous zero-distance cursor refreshes did not clear this state.
+- A separate local UIAccess candidate was built from the same source and signed with an already trusted local certificate. No certificate trust settings were changed. Installed path: `C:\Program Files\Keysor\uiaccess-shell-6d6e1553e602\keysor.exe`; signed SHA256 `00C3AC6167681C9CABEC3C6398A98AF81759339C579B46959E17CF0B506987E0`. Signature is Valid; hook-free token probe reported `ui_access=true`. Its shell policy keeps the overlay visible on Start/Search when UIAccess is active. Actual Start z-order still needs interactive verification.
+- The desktop shortcut was backed up and pointed to the UIAccess candidate. On the subsequent restart request, old Keysor PIDs 43900/47212 exited and new PIDs 43148/50344 started; the new diagnostic header identifies PID 43148 and `C:\Program Files\Keysor\uiaccess-shell-6d6e1553e602\keysor.exe`. Start-menu cursor rendering still needs the user's visual test. This local signed candidate is not the unsigned public release.
+- User reaffirmed that the goal is a no-cost public release. The UIAccess shortcut change was the wrong default for that goal. The desktop shortcut has been backed up again and restored to the unsigned standard candidate `C:\Program Files\Keysor\shell-cursor-89d27b65a58f\keysor.exe` with only `--chrome-remote`; `--diagnose-input` was removed. The installed candidate, `dist/Keysor.exe`, and `dist/Keysor-Setup-1.0.1.exe` are all NotSigned; executable SHA256 matches across installed/source/dist. The currently running UIAccess process could not yet be stopped because elevation confirmation stalled, so the shortcut restoration is not proof of a runtime switch.
+
+## 2026-11-02 Magnet Toggle Responsiveness
+
+- Confirmed code path: HUD applies and saves a magnet setting, then the file watcher reapplies the identical configuration through `reload_configuration`, which deactivates mouse mode. File-watcher updates now skip configurations already active in memory. Explicit license refresh still uses the original reload path; real external configuration changes still reload.
+- Removed snap/input lock inversion: global movement status is captured before the snap-position lock; magnet OFF clears snap state after releasing APP_STATE. Rendering reads snap state without waiting. Clear requests defer to the movement loop when snap state is busy rather than blocking HUD/input callbacks.
+- Added regression tests for preserving mode/held movement keys on magnet self-save and nonblocking snap read/clear under contention. 23 tests passed. Installer and executable rebuilt; interactive remote magnet-toggle behavior remains to be verified.
+- Chrome remote CapsLock compatibility changes are retained. The separate system-popup cursor suppression issue remains unresolved.
+
+## 2026-11-02 Chrome Remote Input Compatibility Candidate
+
+- User confirmed Chrome Remote Desktop is the only available test environment. The diagnostic trace shows the first recorded activation turned mouse mode ON; subsequent activation events toggled it. The trace did not distinguish physical intent from remote lock synchronization.
+- Chromium `remoting/host/input_injector_win.cc` sends virtual-key CapsLock synchronization before non-lock keys, separately from scan-code key presses. Windows hook now passes these scan-zero injected lock-sync events to Windows without treating them as Keysor activation. Recognized CRD signature: `0x43524430`; `--chrome-remote` enables this distinction for older hosts without the signature. This opt-in can also bypass scan-zero synthetic CapsLock from other tools; normal hardware scan-code inputs are preserved.
+- Diagnostic mode now counts passed remote lock-sync events. No typed text is logged. 21 tests passed. The compatibility path is source-grounded but needs user reproduction before claiming the reported first-key symptom fixed.
+- Cursor suppression over system UI remains unresolved. Do not mark this candidate as a complete fix or publish it as resolving both issues. No remote connection, certificate store, global mouse preference, or security setting was changed.
+- Source: https://chromium.googlesource.com/chromium/src/+/HEAD/remoting/host/input_injector_win.cc
+
+## 2026-11-02 Unresolved Input/Cursor Reproduction
+
+- User confirmed the recovery candidate still fails: after the first CapsLock, letters are typed; over system panels, hover works but even physical mouse movement does not reveal the pointer. Do not mark either symptom resolved.
+- Live process audit confirmed the recovery candidate plus its watchdog, not an obsolete build. Activation configuration is Toggle/CapsLock; pointing devices report OK. An external cursor query reported flags=2 and null handle; same-position SendInput succeeded but did not clear suppression. External query alone does not establish the app's exact state during the user's reproduction.
+- Windows startup now waits for keyboard hook readiness before launching its UI. This removes an observed startup ordering gap; the reported first-key failure still requires reproduction to establish causality.
+- `--diagnose-input` enables a bounded 120-second, change-only trace in the user's `.keysor/input-diagnostic-<pid>.jsonl`. Captures activation counts, mouse-mode/modifier state, cursor flags and overlay visibility. No typed text, general key stream, titles or URLs. No diagnostic mode is enabled by default.
+- 20 tests passed. This is a diagnostic candidate, not a confirmed cursor fix; preserve previous installed releases and do not publish as resolved before collecting the reproduction trace.
+
+## 2026-11-02 Cursor Recovery Follow-Up
+
+- User reported an invisible cursor on the first CapsLock activation and when opening Start with the standard build. Runtime causality has not yet been independently reproduced.
+- Confirmed code gaps: restore was guarded by flags never set by the current implementation; the first overlay show could return before positioning/rendering when Windows still reported it hidden.
+- Candidate now queues actual native-cursor recovery on the UI thread, coalesces requests and throttles recovery to 250 ms. It reloads the cursor scheme without persistent setting writes and sends a zero-distance mouse event. It checks OS cursor visibility and refreshes on shell entry, including transparent cursor handles that may report visible.
+- First activation and hidden-to-shown transitions redraw the overlay; permitted positioning no longer depends on the first ShowWindow visibility result. Input mappings and keyboard hook logic are unchanged.
+- 20 unit tests passed; unsigned standard executable and installer rebuilt. These tests do not prove the reported GUI symptoms are resolved. Candidate deployment metadata and shortcut rollback path are in `target/cursor-recovery-deploy.json` when deployment completes. Existing process is not automatically restarted.
+
+## 2026-11-02 No-Cost Distribution Decision
+
+- User selected unsigned standard Windows distribution instead of paid public code signing. This supersedes UIAccess as the public release target below; the installed UIAccess candidate is preserved for local use.
+- `scripts/package-windows.ps1` rebuilds the standard manifest with UIAccess disabled, creates `dist/Keysor-Setup-1.0.1.exe`, `dist/Keysor.exe`, and `dist/SHA256SUMS.txt`. No certificate store access, signing or trust changes are part of this packaging path.
+- Installer uses `Program Files/Keysor/standard`, provides shortcuts and uninstall, and does not launch or stop keyboard hooks. It no longer requires the local development certificate. Setup and the existing standard executable require administrator approval.
+- Native Windows cursor fallback is used on shell surfaces without UIAccess; custom overlay above Start/Search/quick settings is not promised. Input mappings are unchanged.
+- Unsigned publisher/SmartScreen warnings or managed-device blocks remain possible; do not disable security policies. Test installation, shell cursor operation, typing and uninstall on another PC before publishing the final release. Existing running app and desktop shortcut were not replaced.
+- `dist/Verify-Keysor.ps1` performs a hook-free token check expecting `ui_access=false`; it does not establish GUI/input correctness. Old Mac archives in `dist` are unrelated and must not be presented as this build.
+
 ## 2026-11-02 Windows Shell Cursor Candidate
 
 - Fixed the hide-then-show contradiction: suspended overlays now return before `SWP_SHOWWINDOW` positioning. Removed repeated `BringWindowToTop` calls.
@@ -423,14 +513,14 @@ graph TD
     A[Caps Lock 토글 활성화] --> B[이동 조작]
     A --> C[스페이스 클릭 통합]
     A --> D[보조 키 & 스크롤]
-    
+
     B --> B1[왼손 단독: W / A / S / D (부드러운 가속)]
     B --> B2[오른손 단독: Up / Down / Left / Right]
-    
+
     C --> C1[1회 탭: 좌클릭]
     C --> C2[2회 연타: 더블클릭]
     C --> C3[지속 홀드: 좌클릭 다운 (드래그)]
-    
+
     D --> D1[Enter: 좌클릭]
     D --> D2[G: 우클릭]
     D --> D3[R: 마우스 휠 업]

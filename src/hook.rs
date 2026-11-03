@@ -208,6 +208,14 @@ impl AppState {
     }
 
     /// keysor.yaml의 실시간 변경 사항을 라이선스 인증 수준에 맞춰 안전하게 재로드 및 동적 갱신합니다.
+    pub fn apply_file_configuration(&mut self, new_config: Config) {
+        // HUD changes are already applied in memory before saving the file.
+        // Do not deactivate input when the file watcher sees that same save.
+        if self.config != new_config {
+            self.reload_configuration(new_config);
+        }
+    }
+
     pub fn reload_configuration(&mut self, new_config: Config) {
         let is_pro_now = crate::license::check_local_license();
         let is_trial_now = crate::license::check_trial_status();
@@ -619,6 +627,9 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
     if event.is_injected_by_keysor {
         return Some(HookResult::Pass);
     }
+
+    #[cfg(windows)]
+    crate::diagnostics::record_activation(event.is_keydown, event.is_keyup);
 
     let mut indicator_action = IndicatorAction::None;
 
@@ -1185,6 +1196,21 @@ pub fn modifier_sync_guard() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn saved_magnet_toggle_does_not_deactivate_input() {
+        let mut s = initial_state(Config::default(), true, false);
+        s.is_mouse_mode = true;
+        s.active_movement_keys.insert(0x57);
+        s.caps_lock_press_time = Some(Instant::now());
+        for enabled in [true, false, true] {
+            s.config.settings.magnetic_mode = Some(enabled);
+            s.config.settings.global_magnetic_mode = Some(enabled);
+            s.apply_file_configuration(s.config.clone());
+            assert!(s.is_mouse_mode);
+            assert!(s.active_movement_keys.contains(&0x57));
+            assert!(s.caps_lock_press_time.is_some());
+        }
+    }
     fn state() -> AppState {
         let mut s = initial_state(Config::default(), true, false);
         s.is_mouse_mode = true;

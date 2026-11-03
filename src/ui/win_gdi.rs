@@ -40,6 +40,8 @@ pub static HUD_HWND: OnceLock<HWND> = OnceLock::new();
 pub static MAIN_HWND: OnceLock<HWND> = OnceLock::new();
 static HUD_SUPPRESSED_BY_MOUSE_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 const WM_KEYSOR_MINIMIZE_HUD: u32 = 0x8001;
+const WM_KEYSOR_RESTORE_CURSOR: u32 = 0x8002;
+static CURSOR_RESTORE_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn should_show_hud() -> bool {
     !IS_INPUTTING_LICENSE.load(Ordering::SeqCst)
@@ -911,7 +913,16 @@ unsafe extern "system" fn main_wnd_proc(
                 if let Some(&hud) = HUD_HWND.get() {
                     ShowWindow(hud, SW_HIDE);
                 }
+                restore_native_pointer_on_ui_thread();
+                if let Some(&indicator) = INDICATOR_HWND.get() {
+                    update_indicator_layered_image(indicator);
+                }
                 update_indicator_position();
+                0
+            }
+            WM_KEYSOR_RESTORE_CURSOR => {
+                CURSOR_RESTORE_PENDING.store(false, Ordering::SeqCst);
+                restore_native_pointer_on_ui_thread();
                 0
             }
             WM_SYSCOMMAND => {
@@ -1297,6 +1308,7 @@ fn toggle_language() {
 
 fn toggle_magnet() {
     let mut config_to_save = None;
+    let mut clear_snap = false;
     if let Some(state_arc) = crate::hook::APP_STATE.get() {
         if let Ok(mut state) = state_arc.lock() {
             let cur = state.config.settings.magnetic_mode.unwrap_or(false);
@@ -1304,10 +1316,13 @@ fn toggle_magnet() {
             state.config.settings.magnetic_mode = Some(next_mode);
             state.config.settings.global_magnetic_mode = Some(next_mode); // Sync global magnet mode too!
             if !next_mode {
-                clear_magnetic_snapping();
+                clear_snap = true;
             }
             config_to_save = Some(state.config.clone());
         }
+    }
+    if clear_snap {
+        clear_magnetic_snapping();
     }
     if let Some(cfg) = config_to_save {
         crate::config::save_config(&cfg);
@@ -2589,8 +2604,6 @@ pub fn start_indicator() {
     });
 }
 
-static HIDE_CURSOR_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-static KEYSOR_CURSOR_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 fn hide_system_cursor_internal() {
     // Preserve the native pointer as the fallback.
     force_restore_system_cursor();
@@ -2609,16 +2622,32 @@ pub fn restore_system_cursor() {
 }
 
 pub fn force_restore_system_cursor() {
-    let was_hidden = HIDE_CURSOR_ACTIVE.swap(false, Ordering::SeqCst);
-    let was_keysor = KEYSOR_CURSOR_ACTIVE.swap(false, Ordering::SeqCst);
-    if was_hidden || was_keysor {
+    // Never run desktop-wide recovery synchronously from the keyboard hook.
+    if let Some(&hwnd) = MAIN_HWND.get() {
+        if !CURSOR_RESTORE_PENDING.swap(true, Ordering::SeqCst) {
+            unsafe {
+                if windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(hwnd, WM_KEYSOR_RESTORE_CURSOR, 0, 0) == 0 {
+                    CURSOR_RESTORE_PENDING.store(false, Ordering::SeqCst);
+                }
+            }
+        }
+    }
+}
+
+fn restore_native_pointer_on_ui_thread() {
+    static LAST_RESTORE: OnceLock<Mutex<Option<std::time::Instant>>> = OnceLock::new();
+    let mut last = LAST_RESTORE.get_or_init(|| Mutex::new(None)).lock().unwrap();
+    if last.is_some_and(|time| time.elapsed() < std::time::Duration::from_millis(250)) {
+        return;
+    }
+    *last = Some(std::time::Instant::now());
+    drop(last);
         unsafe {
             windows_sys::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(
                 windows_sys::Win32::UI::WindowsAndMessaging::SPI_SETCURSORS,
                 0,
                 std::ptr::null_mut(),
-                windows_sys::Win32::UI::WindowsAndMessaging::SPIF_SENDCHANGE
-                    | windows_sys::Win32::UI::WindowsAndMessaging::SPIF_UPDATEINIFILE,
+                0,
             );
             windows_sys::Win32::UI::Input::KeyboardAndMouse::mouse_event(
                 windows_sys::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_MOVE,
@@ -2628,7 +2657,6 @@ pub fn force_restore_system_cursor() {
                 0,
             );
         }
-    }
 }
 
 pub fn show_indicator() {
@@ -2696,30 +2724,47 @@ mod shell_cursor_tests {
     use super::shell_surface_needs_native_cursor;
 
     #[test]
-    fn shell_panels_require_uiaccess() {
+    fn shell_panels_use_native_cursor() {
         for process in ["StartMenuExperienceHost.exe", "SearchHost.exe", "ShellExperienceHost.exe", "ControlCenter.exe", "Taskmgr.exe"] {
-            assert!(shell_surface_needs_native_cursor(process, "", false));
-            assert!(!shell_surface_needs_native_cursor(process, "", true));
+            assert!(shell_surface_needs_native_cursor(process, ""));
         }
-        assert!(shell_surface_needs_native_cursor("", "XamlExplorerHostIslandWindow", false));
-        assert!(!shell_surface_needs_native_cursor("", "XamlExplorerHostIslandWindow", true));
+        assert!(shell_surface_needs_native_cursor("", "XamlExplorerHostIslandWindow"));
     }
 
     #[test]
     fn secure_and_switching_surfaces_keep_native_pointer() {
-        for uiaccess in [false, true] {
-            assert!(shell_surface_needs_native_cursor("consent.exe", "", uiaccess));
-            for class in ["ForegroundStaging", "MultitaskingViewFrame"] {
-                assert!(shell_surface_needs_native_cursor("explorer.exe", class, uiaccess));
-            }
+        assert!(shell_surface_needs_native_cursor("consent.exe", ""));
+        for class in ["ForegroundStaging", "MultitaskingViewFrame"] {
+            assert!(shell_surface_needs_native_cursor("explorer.exe", class));
         }
     }
 
     #[test]
     fn ordinary_windows_keep_overlay() {
-        for uiaccess in [false, true] {
-            assert!(!shell_surface_needs_native_cursor("notepad.exe", "Notepad", uiaccess));
-            assert!(!shell_surface_needs_native_cursor("explorer.exe", "Shell_TrayWnd", uiaccess));
+        assert!(!shell_surface_needs_native_cursor("notepad.exe", "Notepad"));
+        assert!(!shell_surface_needs_native_cursor("explorer.exe", "Shell_TrayWnd"));
+    }
+
+    #[test]
+    fn native_cursor_recovery_uses_os_state() {
+        assert!(super::native_pointer_needs_refresh(0, true));
+        assert!(super::native_pointer_needs_refresh(2, true));
+        assert!(super::native_pointer_needs_refresh(1, false));
+        assert!(!super::native_pointer_needs_refresh(1, true));
+    }
+}
+
+fn native_pointer_needs_refresh(flags: u32, has_cursor: bool) -> bool {
+    flags & windows_sys::Win32::UI::WindowsAndMessaging::CURSOR_SHOWING == 0 || !has_cursor
+}
+
+fn ensure_native_pointer_visible() {
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{CURSORINFO, GetCursorInfo};
+        let mut info: CURSORINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<CURSORINFO>() as u32;
+        if GetCursorInfo(&mut info) != 0 && native_pointer_needs_refresh(info.flags, info.hCursor != 0) {
+            force_restore_system_cursor();
         }
     }
 }
@@ -2729,15 +2774,13 @@ fn process_has_uiaccess() -> bool {
     *ACTIVE.get_or_init(|| unsafe { is_process_uiaccess_active() })
 }
 
-fn shell_surface_needs_native_cursor(proc_name: &str, class_name: &str, uiaccess: bool) -> bool {
+fn shell_surface_needs_native_cursor(proc_name: &str, class_name: &str) -> bool {
     let p = proc_name.to_ascii_lowercase();
     let c = class_name.to_ascii_lowercase();
-    if p == "consent.exe" || matches!(c.as_str(), "foregroundstaging" | "multitaskingviewframe") {
-        return true;
-    }
-    !uiaccess && (matches!(p.as_str(),
-        "startmenuexperiencehost.exe" | "searchhost.exe" | "shellexperiencehost.exe"
-        | "controlcenter.exe" | "taskmgr.exe") || c == "xamlexplorerhostislandwindow")
+    matches!(p.as_str(), "consent.exe" | "startmenuexperiencehost.exe" | "searchhost.exe"
+        | "shellexperiencehost.exe" | "controlcenter.exe" | "taskmgr.exe")
+        || matches!(c.as_str(), "foregroundstaging" | "multitaskingviewframe"
+            | "xamlexplorerhostislandwindow")
 }
 
 unsafe fn is_system_shell_foreground_with_info(hwnd: HWND, proc_name: &str, class_name: &str) -> bool {
@@ -2757,7 +2800,7 @@ unsafe fn is_system_shell_foreground_with_info(hwnd: HWND, proc_name: &str, clas
             if hwnd == indicator_hwnd { return false; }
         }
 
-        shell_surface_needs_native_cursor(proc_name, class_name, process_has_uiaccess())
+        shell_surface_needs_native_cursor(proc_name, class_name)
     }
 }
 
@@ -2775,6 +2818,13 @@ fn get_foreground_window_info(fore_hwnd: HWND) -> (String, String) {
         }
     }
     (proc_name, class_name)
+}
+
+pub fn shell_cursor_diagnostic(fore_hwnd: HWND) -> (String, String, bool) {
+    let (process, class) = get_foreground_window_info(fore_hwnd);
+    let native_fallback = fore_hwnd == 0
+        || shell_surface_needs_native_cursor(&process, &class);
+    (process, class, native_fallback)
 }
 
 fn write_debug_log(
@@ -2809,15 +2859,23 @@ fn write_debug_log(
 }
 
 fn handle_cursor_visibility(hwnd: HWND, current_mouse_mode: bool, is_suspended: bool, is_visible: &mut bool) -> bool {
+    static LAST_FALLBACK_WINDOW: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
     unsafe {
         // Keep the native pointer available when the overlay cannot be displayed.
-        force_restore_system_cursor();
+        ensure_native_pointer_visible();
+        let fallback_window = if is_suspended { GetForegroundWindow() } else { 0 };
+        if LAST_FALLBACK_WINDOW.swap(fallback_window, Ordering::SeqCst) != fallback_window && is_suspended {
+            // A transparent cursor may still report CURSOR_SHOWING; refresh on shell entry too.
+            force_restore_system_cursor();
+        }
         if current_mouse_mode && !is_suspended {
             if !*is_visible {
+                update_indicator_layered_image(hwnd);
                 windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNA);
                 *is_visible = windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0;
             }
-            *is_visible
+            // Allow the subsequent SWP_SHOWWINDOW even if the first show was ignored.
+            true
         } else {
             if *is_visible {
                 windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE);

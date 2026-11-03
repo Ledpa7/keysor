@@ -21,6 +21,7 @@ static LAST_GLOBAL_SNAPPED_POS: OnceLock<Mutex<Option<(i32, i32, bool)>>> = Once
 static LAST_JUMP_TIME: OnceLock<Mutex<std::time::Instant>> = OnceLock::new();
 static HUD_ESCAPE_ACCUM: OnceLock<Mutex<f64>> = OnceLock::new();
 static GLOBAL_ESCAPE_ACCUM: OnceLock<Mutex<f64>> = OnceLock::new();
+static CLEAR_SNAP_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(debug_assertions)]
 fn log_debug(msg: &str) {
@@ -733,6 +734,16 @@ pub fn start_global_targets_thread() {
 }
 
 pub fn check_global_magnetic_snapping() {
+    if CLEAR_SNAP_PENDING.swap(false, Ordering::SeqCst) {
+        if let Some(lock) = LAST_GLOBAL_SNAPPED_POS.get() {
+            if let Ok(mut pos) = lock.try_lock() {
+                *pos = None;
+            } else {
+                CLEAR_SNAP_PENDING.store(true, Ordering::SeqCst);
+            }
+        }
+        return;
+    }
     let state_arc = crate::hook::APP_STATE.get();
     let (enabled, is_mouse_mode, is_dragging, features_enabled) = state_arc.map_or((false, false, false, false), |arc| {
         let state = arc.lock().unwrap();
@@ -779,11 +790,13 @@ pub fn check_global_magnetic_snapping() {
     
     static ESCAPED_COOLDOWN: OnceLock<Mutex<EscapedCooldownState>> = OnceLock::new();
     
+    // Snapshot input before acquiring snap state: rendering reads them in that order.
+    let movement_status = get_movement_status();
     let last_snapped_lock = LAST_GLOBAL_SNAPPED_POS.get_or_init(|| Mutex::new(None));
     let mut last_pos = last_snapped_lock.lock().unwrap();
     
     if let Some((sx, sy, landed)) = *last_pos {
-        let (base_speed, should_release, new_dir, hold_duration) = get_movement_status();
+        let (base_speed, should_release, new_dir, hold_duration) = movement_status;
         let cooldown_limit = calculate_cooldown_limit(hold_duration);
         
         let accum_lock = GLOBAL_ESCAPE_ACCUM.get_or_init(|| Mutex::new(0.0));
@@ -983,7 +996,7 @@ pub fn check_global_magnetic_snapping() {
 pub fn is_currently_snapped() -> bool {
     let hud_snapped = HUD_LAST_SNAPPED.load(std::sync::atomic::Ordering::SeqCst) != 0;
     let global_snapped = LAST_GLOBAL_SNAPPED_POS.get()
-        .and_then(|lock| lock.lock().ok())
+        .and_then(|lock| lock.try_lock().ok())
         .map(|pos| pos.is_some())
         .unwrap_or(false);
     hud_snapped || global_snapped
@@ -991,7 +1004,28 @@ pub fn is_currently_snapped() -> bool {
 
 pub fn clear_magnetic_snapping() {
     HUD_LAST_SNAPPED.store(0, std::sync::atomic::Ordering::SeqCst);
-    if let Some(Ok(mut pos)) = LAST_GLOBAL_SNAPPED_POS.get().map(|lock| lock.lock()) {
+    CLEAR_SNAP_PENDING.store(true, Ordering::SeqCst);
+    if let Some(Ok(mut pos)) = LAST_GLOBAL_SNAPPED_POS.get().map(|lock| lock.try_lock()) {
         *pos = None;
+    }
+}
+
+#[cfg(test)]
+mod responsiveness_tests {
+    use super::*;
+
+    #[test]
+    fn snap_reads_and_clear_do_not_wait_for_movement_lock() {
+        let lock = LAST_GLOBAL_SNAPPED_POS.get_or_init(|| Mutex::new(None));
+        let mut held = lock.lock().unwrap();
+        *held = Some((20, 30, true));
+        HUD_LAST_SNAPPED.store(0, Ordering::SeqCst);
+        assert!(!is_currently_snapped());
+        clear_magnetic_snapping();
+        assert!(CLEAR_SNAP_PENDING.load(Ordering::SeqCst));
+        drop(held);
+        check_global_magnetic_snapping();
+        assert!(lock.lock().unwrap().is_none());
+        assert!(!CLEAR_SNAP_PENDING.load(Ordering::SeqCst));
     }
 }

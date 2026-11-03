@@ -6,6 +6,10 @@ mod hook;
 mod platform;
 mod license;
 mod update;
+#[cfg(windows)]
+mod diagnostics;
+#[cfg(windows)]
+mod watchdog;
 
 mod indicator;
 mod ui;
@@ -73,127 +77,14 @@ fn ensure_single_instance_win() -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn base64_encode(data: &[u8]) -> String {
-    const CHARSET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
-    for chunk in data.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-        result.push(CHARSET[((triple >> 18) & 0x3F) as usize] as char);
-        result.push(CHARSET[((triple >> 12) & 0x3F) as usize] as char);
-        if chunk.len() > 1 {
-            result.push(CHARSET[((triple >> 6) & 0x3F) as usize] as char);
-        } else {
-            result.push('=');
-        }
-        if chunk.len() > 2 {
-            result.push(CHARSET[(triple & 0x3F) as usize] as char);
-        } else {
-            result.push('=');
-        }
-    }
-    result
-}
-
-#[cfg(target_os = "windows")]
-pub fn restore_windows_system_cursor() {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        SystemParametersInfoW, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SPI_SETCURSORS,
-    };
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{mouse_event, MOUSEEVENTF_MOVE};
-    unsafe {
-        SystemParametersInfoW(
-            SPI_SETCURSORS,
-            0,
-            std::ptr::null_mut(),
-            SPIF_SENDCHANGE | SPIF_UPDATEINIFILE,
-        );
-        // 마우스 미세 넛지로 DWM 하드웨어 커서 비트맵 갱신 유도
-        mouse_event(MOUSEEVENTF_MOVE, 0, 0, 0, 0);
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn run_windows_watchdog(parent_pid: u32) {
-    const SYNCHRONIZE: u32 = 0x00100000;
-    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, WaitForSingleObject};
-
-    unsafe {
-        // 1. 워치독 시작 즉시 이전 남아있을 수 있는 투명 커서 1차 복구 (Self-Healing)
-        restore_windows_system_cursor();
-
-        let h_process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION, 0, parent_pid);
-        if h_process != 0 {
-            // CPU 점유율 0.00% 완전 수면 상태로 부모(메인 키서) 프로세스 강제종료/사망 감시 대기
-            WaitForSingleObject(h_process, 0xFFFFFFFF); // INFINITE
-            windows_sys::Win32::Foundation::CloseHandle(h_process);
-        } else {
-            // 이미 부모 프로세스가 종료된 상태라면 잠시 대기
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-
-        // 2. 메인 키서 종료/강제종료(taskkill /F, 크래시 등) 감지 시 마우스 커서 100% 즉시 복구
-        for _ in 0..3 {
-            restore_windows_system_cursor();
-            std::thread::sleep(std::time::Duration::from_millis(30));
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn spawn_watchdog_subprocess() {
-    let parent_pid = std::process::id();
-    use std::os::windows::process::CommandExt;
-    const DETACHED_PROCESS: u32 = 0x00000008;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-
-    // 1. Windows OS 네이티브 파워쉘 기반 독립 워치독 가동
-    // 디펜더가 keysor.exe를 차단/격리하여 keysor.exe 전체 프로세스를 사살하더라도,
-    // Microsoft 서명된 powershell.exe는 디펜더가 사살하지 않고 유지되므로 100% 커서를 복원함.
-    let script = format!(
-        "$s = @'\n\
-using System;\n\
-using System.Runtime.InteropServices;\n\
-public class Win32Cursor {{\n\
-    [DllImport(\"user32.dll\", EntryPoint=\"SystemParametersInfoW\")]\n\
-    public static extern bool SPI(uint u, uint p, IntPtr v, uint f);\n\
-    [DllImport(\"user32.dll\")]\n\
-    public static extern void mouse_event(uint f, uint x, uint y, uint d, UIntPtr e);\n\
-}}\n\
-'@;\n\
-Add-Type -TypeDefinition $s;\n\
-$p = Get-Process -Id {} -ErrorAction SilentlyContinue;\n\
-if ($p) {{ $p.WaitForExit(); }}\n\
-[Win32Cursor]::SPI(0x0057, 0, [IntPtr]::Zero, 3);\n\
-[Win32Cursor]::mouse_event(1, 0, 0, 0, [UIntPtr]::Zero);\n",
-        parent_pid
-    );
-
-    let utf16_bytes: Vec<u8> = script
-        .encode_utf16()
-        .flat_map(|u| u.to_le_bytes())
-        .collect();
-    let encoded = base64_encode(&utf16_bytes);
-
-    let _ = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", &encoded])
-        .creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP)
-        .spawn();
-
-    // 2. keysor.exe 자체 서브프로세스 워치독 보조 가동
-    if let Ok(exe_path) = std::env::current_exe() {
-        let _ = std::process::Command::new(exe_path)
-            .args(["--watchdog", &parent_pid.to_string()])
-            .creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP)
-            .spawn();
-    }
+pub fn restore_windows_system_cursor() -> bool {
+    watchdog::restore_cursor()
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    #[cfg(windows)]
+    platform::windows::set_chrome_remote_mode(args.iter().any(|arg| arg == "--chrome-remote"));
     #[cfg(target_os = "windows")]
     {
         // Verify the installed token without starting hooks, windows, or watchdogs.
@@ -213,16 +104,18 @@ fn main() {
         }
         // 0. 비상 커서 복구 커맨드라인 인자 처리 (keysor --restore 또는 keysor -r)
         if args.len() >= 2 && (args[1] == "--restore" || args[1] == "--restore-cursor" || args[1] == "-r") {
-            restore_windows_system_cursor();
-            println!("[Keysor] Windows system cursor restored successfully.");
+            let restored = restore_windows_system_cursor();
+            println!("[Keysor] Windows system cursor reload succeeded: {}", restored);
+            if !restored { std::process::exit(1); }
             return;
         }
 
         if args.len() >= 3 && args[1] == "--watchdog" {
-            if let Ok(pid) = args[2].parse::<u32>() {
-                run_windows_watchdog(pid);
+            if let (Ok(pid), Some(report_path)) = (args[2].parse::<u32>(), args.get(3)) {
+                watchdog::run(pid, Path::new(report_path));
                 return;
             }
+            std::process::exit(2);
         }
 
         // 1. 단일 인스턴스 보장 (중복 실행 방지)
@@ -252,7 +145,7 @@ fn main() {
         }
 
         // 3. 커널 강제종료(taskkill /F) 감지 독립 워치독 보조 프로세스 가동 (CPU 0.00%, RAM < 1MB)
-        spawn_watchdog_subprocess();
+        watchdog::spawn();
     }
     #[cfg(target_os = "macos")]
     if !ensure_single_instance() {
@@ -336,6 +229,7 @@ fn main() {
     update::check_for_updates_async();
 
     // 4. 커서 시각 인디케이터 스레드 가동
+    #[cfg(not(windows))]
     indicator::start_indicator();
 
     // 5. 백그라운드 윈도우 키보드 저수준 훅 스레드 구동
@@ -349,6 +243,14 @@ fn main() {
                 encode_wide("Keysor startup failed").as_ptr(), 0x10);
         }
         std::process::exit(1);
+    }
+    #[cfg(windows)]
+    {
+        if args.iter().any(|arg| arg == "--diagnose-input") {
+            diagnostics::start();
+        }
+        // Do not present the ready UI before the input hook is installed.
+        indicator::start_indicator();
     }
     println!("[Info] Keysor active and listening to inputs in background.");
 
@@ -388,7 +290,7 @@ fn main() {
             };
             if let Some(state_arc) = hook::APP_STATE.get() {
                 let mut state = state_arc.lock().unwrap();
-                state.reload_configuration(new_config);
+                state.apply_file_configuration(new_config);
             }
         }
     }

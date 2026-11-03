@@ -5,7 +5,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct Settings {
     pub modifier_mode: String,
     pub modifier_key: String,
@@ -24,13 +24,13 @@ pub struct Settings {
     pub license_key: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct Binding {
     pub trigger: String,
     pub action: String,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct Config {
     pub settings: Settings,
     pub bindings: Vec<Binding>,
