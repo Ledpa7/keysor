@@ -1,37 +1,30 @@
+#[path = "hud.rs"]
+mod hud;
+
 use std::sync::{OnceLock, Mutex};
 use std::thread;
 use std::sync::atomic::{AtomicU32, Ordering};
-use uiautomation::core::UIAutomation;
-use uiautomation::types::Handle;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, POINT, RECT, SIZE};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, POINT, SIZE};
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, CreateSolidBrush, DeleteObject, SelectObject, CreatePen,
-    InvalidateRect, UpdateWindow, RoundRect, SetTextColor, SetBkMode, DrawTextW,
-    CreateFontW, GetDC, ReleaseDC, CreateCompatibleDC, CreateDIBSection, DeleteDC,
+    BeginPaint, EndPaint, DeleteObject, SelectObject, InvalidateRect, UpdateWindow,
+    GetDC, ReleaseDC, CreateCompatibleDC, CreateDIBSection, DeleteDC,
     BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, AC_SRC_OVER, AC_SRC_ALPHA,
-    CreateCompatibleBitmap, BitBlt, SRCCOPY, SetMapMode, SetWindowExtEx, SetViewportExtEx,
-    MM_ANISOTROPIC, MM_TEXT, Ellipse
 };
 use windows_sys::Win32::Graphics::GdiPlus::{
-    GdiplusStartup, GdiplusStartupInput,
-    GdipCreateFromHDC, GdipDeleteGraphics, GdipSetSmoothingMode,
-    GdipCreatePen1, GdipDeletePen, GdipDrawLineI, SmoothingModeAntiAlias,
-    GdipSetPenStartCap, GdipSetPenEndCap, GdipSetPenLineJoin,
-    GdipCreateLineBrush, GdipCreatePen2, GdipDeleteBrush, PointF,
-    GdipScaleWorldTransform, GdipCreateSolidFill, GdipFillEllipse, GdipDrawEllipse,
-    GdipCreatePath, GdipDeletePath, GdipAddPathArc, GdipClosePathFigure,
-    GdipFillPath, GdipDrawPath
+    GdiplusStartup, GdiplusStartupInput, GdipCreateFromHDC, GdipDeleteGraphics,
+    GdipSetSmoothingMode, GdipCreatePen1, GdipDeletePen, GdipDrawLineI,
+    SmoothingModeAntiAlias, GdipSetPenStartCap, GdipSetPenEndCap, GdipSetPenLineJoin,
+    GdipCreateLineBrush, GdipCreatePen2, GdipDeleteBrush, PointF, GdipScaleWorldTransform,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    RegisterClassW, CreateWindowExW, DefWindowProcW, ShowWindow, SetWindowPos, MSG,
-    WNDCLASSW, CS_HREDRAW, CS_VREDRAW, WS_POPUP, WS_EX_LAYERED, WS_EX_TRANSPARENT,
+    RegisterClassW, CreateWindowExW, DefWindowProcW, ShowWindow, MSG, WNDCLASSW,
+    CS_HREDRAW, CS_VREDRAW, WS_POPUP, WS_EX_LAYERED, WS_EX_TRANSPARENT,
     WS_EX_TOPMOST, WS_EX_NOACTIVATE, SW_HIDE, SW_SHOWNA, LWA_ALPHA, WM_PAINT,
-    WM_DESTROY, GetMessageW, TranslateMessage, DispatchMessageW, HWND_TOPMOST,
-    SWP_NOSIZE, SWP_NOACTIVATE, SetLayeredWindowAttributes, GetClientRect, GetSystemMetrics,
-    WS_EX_APPWINDOW, WM_CLOSE, GetSystemMenu, AppendMenuW,
-    MF_SEPARATOR, MF_STRING, WM_SYSCOMMAND, SW_MINIMIZE, WS_MINIMIZEBOX, WS_SYSMENU,
-    WM_ERASEBKGND, UpdateLayeredWindow, ULW_ALPHA, GetClassNameW, GetWindowRect,
-    WS_EX_TOOLWINDOW, GetForegroundWindow
+    WM_DESTROY, GetMessageW, TranslateMessage, DispatchMessageW,
+    SetLayeredWindowAttributes, GetSystemMetrics, WS_EX_APPWINDOW, WM_CLOSE,
+    GetSystemMenu, AppendMenuW, MF_SEPARATOR, MF_STRING, WM_SYSCOMMAND, SW_MINIMIZE,
+    WS_MINIMIZEBOX, WS_SYSMENU, WM_ERASEBKGND, UpdateLayeredWindow, ULW_ALPHA,
+    GetClassNameW, WS_EX_TOOLWINDOW, GetForegroundWindow,
 };
 use crate::ui::win_uia::{is_currently_snapped, clear_magnetic_snapping};
 
@@ -41,11 +34,25 @@ pub static MAIN_HWND: OnceLock<HWND> = OnceLock::new();
 static HUD_SUPPRESSED_BY_MOUSE_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 const WM_KEYSOR_MINIMIZE_HUD: u32 = 0x8001;
 const WM_KEYSOR_RESTORE_CURSOR: u32 = 0x8002;
+const WM_KEYSOR_OPEN_HUD: u32 = 0x8003;
+const WM_KEYSOR_CURSOR_STYLE: u32 = 0x8004;
+#[cfg(test)]
+static STYLE_UPDATE_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[cfg(test)]
+static DETAIL_QUERY_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static CURSOR_STYLE_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static CURSOR_RESTORE_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-fn should_show_hud() -> bool {
-    !IS_INPUTTING_LICENSE.load(Ordering::SeqCst)
-        && !HUD_SUPPRESSED_BY_MOUSE_MODE.load(Ordering::SeqCst)
+fn hud_can_open(inputting_license: bool, suppressed_by_mouse_mode: bool, explicit_open: bool) -> bool {
+    !inputting_license && (explicit_open || !suppressed_by_mouse_mode)
+}
+
+fn should_show_hud(explicit_open: bool) -> bool {
+    hud_can_open(
+        IS_INPUTTING_LICENSE.load(Ordering::SeqCst),
+        HUD_SUPPRESSED_BY_MOUSE_MODE.load(Ordering::SeqCst),
+        explicit_open,
+    )
 }
 static GDIPLUS_TOKEN: OnceLock<usize> = OnceLock::new();
 pub static HUD_HOVER: AtomicU32 = AtomicU32::new(0); // 0: none, 1: minimize, 2: close
@@ -340,7 +347,7 @@ fn prompt_license_input(parent_hwnd: HWND, lang_en: bool) {
         // Re-enable HUD and restore visibility
         if let Some(&hud) = HUD_HWND.get() {
             windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(hud, 1);
-            if should_show_hud() {
+            if should_show_hud(false) {
                 ShowWindow(hud, SW_SHOWNA);
                 windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(hud);
             }
@@ -657,7 +664,7 @@ fn prompt_sens_value_input(parent_hwnd: HWND, target: HudHitTarget, lang_en: boo
 
         if let Some(&hud) = HUD_HWND.get() {
             windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(hud, 1);
-            if should_show_hud() {
+            if should_show_hud(false) {
                 ShowWindow(hud, SW_SHOWNA);
                 windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(hud);
             }
@@ -821,85 +828,6 @@ fn toggle_startup_shortcut() {
     }
 }
 
-fn draw_key_cap(
-    hdc: windows_sys::Win32::Graphics::Gdi::HDC,
-    font: windows_sys::Win32::Graphics::Gdi::HFONT,
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-    key_text: &str,
-    desc_text: &str,
-    category: u32, // 0: none, 1: Caps Lock, 2: WASD, 3: QERF, 4: Spacebar
-) {
-    unsafe {
-        let bg_color = 0x202424; 
-        let border_color = match category {
-            1 => 0x3300FF, // Caps Lock: 네온 레드 (BGR: B=00, G=00, R=FF와 보정)
-            2 => 0x40E000, // WASD: Grass Green
-            3 => 0xFFFF00, // QERF: 네온 파랑 (Cyan)
-            4 => 0x0045FF, // Spacebar: 네온 오렌지 (커서 드래그 색상과 동기화)
-            5 => 0x00FFFF, // G Key: 네온 노랑 (Yellow)
-            6 => 0xFFFFFF, // Shift: 흰색
-            _ => 0x3C4040, // Non-highlighted (Grey)
-        };
-        
-        let brush = CreateSolidBrush(bg_color);
-        let pen = CreatePen(0, 1, border_color);
-
-        let old_brush = SelectObject(hdc, brush);
-        let old_pen = SelectObject(hdc, pen);
-        let old_font = SelectObject(hdc, font);
-
-        RoundRect(hdc, x, y, x + w, y + h, 8, 8);
-
-        SetTextColor(hdc, if category > 0 { border_color } else { 0x888888 });
-        let key_w = encode_wide(key_text);
-        if desc_text.is_empty() {
-            let mut r_key = RECT { left: x, top: y, right: x + w, bottom: y + h };
-            DrawTextW(hdc, key_w.as_ptr(), key_w.len() as i32 - 1, &mut r_key, 1 | 4 | 32); // DT_CENTER | DT_VCENTER | DT_SINGLELINE
-        } else {
-            let mut r_key = RECT { left: x, top: y + 4, right: x + w, bottom: y + 21 };
-            DrawTextW(hdc, key_w.as_ptr(), key_w.len() as i32 - 1, &mut r_key, 1 | 32);
-
-            // 영문 텍스트가 좁은 키캡(w <= 45)에서 짤리는 것을 방지하기 위해 동적으로 작은 폰트 적용
-            let desc_font = if w <= 45 && desc_text.len() > 4 {
-                let font_name = encode_wide("Segoe UI");
-                CreateFontW(11, 0, 0, 0, 500, 0, 0, 0, 1, 0, 0, 5, 0, font_name.as_ptr())
-            } else {
-                0
-            };
-
-            let old_desc_font = if desc_font != 0 {
-                SelectObject(hdc, desc_font)
-            } else {
-                0
-            };
-
-            SetTextColor(hdc, if category > 0 { 0xFFFFFF } else { 0x555555 });
-            let desc_w = encode_wide(desc_text);
-            let is_multiline = desc_text.contains('\n');
-            let top_offset = if is_multiline { 18 } else { 23 }; // 2줄 설명(Shift 등)만 18, 1줄 설명(J, K, WASD 등)은 23으로 완벽 통일
-            let bottom_offset = if is_multiline { 2 } else { 4 };
-            let mut r_desc = RECT { left: x + 2, top: y + top_offset, right: x + w - 2, bottom: y + h - bottom_offset };
-            let align = if is_multiline { 1 } else { 1 | 32 };
-            DrawTextW(hdc, desc_w.as_ptr(), desc_w.len() as i32 - 1, &mut r_desc, align);
-
-            if desc_font != 0 {
-                SelectObject(hdc, old_desc_font);
-                DeleteObject(desc_font);
-            }
-        }
-
-        SelectObject(hdc, old_font);
-        SelectObject(hdc, old_brush);
-        SelectObject(hdc, old_pen);
-        
-        DeleteObject(brush);
-        DeleteObject(pen);
-    }
-}
-
 unsafe extern "system" fn main_wnd_proc(
     hwnd: HWND,
     msg: u32,
@@ -907,6 +835,9 @@ unsafe extern "system" fn main_wnd_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     unsafe {
+        if let Some(result) = crate::win_shortcuts::handle_message(hwnd, msg, wparam) {
+            return result;
+        }
         match msg {
             WM_KEYSOR_MINIMIZE_HUD => {
                 ShowWindow(hwnd, SW_MINIMIZE);
@@ -918,6 +849,23 @@ unsafe extern "system" fn main_wnd_proc(
                     update_indicator_layered_image(indicator);
                 }
                 update_indicator_position();
+                0
+            }
+            WM_KEYSOR_CURSOR_STYLE => {
+                #[cfg(test)]
+                STYLE_UPDATE_COUNT.fetch_add(1, Ordering::Relaxed);
+                CURSOR_STYLE_PENDING.store(false, Ordering::SeqCst);
+                crate::cursor_scheme::set_custom(custom_cursor_needed_now());
+                0
+            }
+            WM_KEYSOR_OPEN_HUD => {
+                if should_show_hud(true) {
+                    ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_RESTORE);
+                    if let Some(&hud) = HUD_HWND.get() {
+                        ShowWindow(hud, windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOW);
+                        windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hud);
+                    }
+                }
                 0
             }
             WM_KEYSOR_RESTORE_CURSOR => {
@@ -953,7 +901,7 @@ unsafe extern "system" fn main_wnd_proc(
                         ShowWindow(hud, SW_HIDE);
                         crate::ui::win_uia::clear_magnetic_snapping();
                     } else if state == 0 { // SIZE_RESTORED
-                        if should_show_hud() {
+                        if should_show_hud(true) {
                             ShowWindow(hud, SW_SHOWNA);
                         }
                     }
@@ -965,7 +913,7 @@ unsafe extern "system" fn main_wnd_proc(
                 println!("[Debug] main_wnd_proc WM_ACTIVATE: state={}", state);
                 if state != 0 { // Activated
                     if let Some(&hud) = HUD_HWND.get() {
-                        if should_show_hud() {
+                        if should_show_hud(false) {
                             ShowWindow(hud, SW_SHOWNA);
                         }
                     }
@@ -1099,6 +1047,155 @@ fn get_indicator_dpi_scale() -> f64 {
     }
 }
 
+fn draw_cursor_artwork(hdc_mem: isize, dpi_scale: f64, scale_val: f32, offset: (f32, f32)) {
+    let scale_coord = |coord: i32, center: i32| -> i32 {
+        center + ((coord - center) as f32 * scale_val).round() as i32
+    };
+    unsafe {
+        // Draw cursor using GDI+
+        let mut graphics = std::ptr::null_mut();
+        if GdipCreateFromHDC(hdc_mem, &mut graphics) == 0 {
+            GdipSetSmoothingMode(graphics, SmoothingModeAntiAlias);
+            GdipScaleWorldTransform(graphics, dpi_scale as f32, dpi_scale as f32, 0);
+            windows_sys::Win32::Graphics::GdiPlus::GdipTranslateWorldTransform(graphics, offset.0, offset.1, 0);
+        
+            // 1. Draw high-contrast black border first (4.0px width)
+            let mut black_pen = std::ptr::null_mut();
+            if GdipCreatePen1(0xFF000000, 4.0, 0, &mut black_pen) == 0 {
+                GdipSetPenStartCap(black_pen, 2); // LineCapRound = 2
+                GdipSetPenEndCap(black_pen, 2);   // LineCapRound = 2
+                GdipSetPenLineJoin(black_pen, 2);  // LineJoinRound = 2
+        
+                GdipDrawLineI(graphics, black_pen, 16, 16, scale_coord(19, 16), scale_coord(29, 16));
+                GdipDrawLineI(graphics, black_pen, 16, 16, scale_coord(30, 16), scale_coord(27, 16));
+                GdipDrawLineI(graphics, black_pen, scale_coord(18, 16), scale_coord(25, 16), scale_coord(25, 16), scale_coord(14, 16));
+        
+                GdipDeletePen(black_pen);
+            }
+        
+            // 2. Determine gradient colors based on state
+            let (is_dragging, is_scrolling, is_snapped) = if let Some(state_arc) = crate::hook::APP_STATE.get() {
+                if let Ok(state) = state_arc.try_lock() {
+                    (state.is_dragging, !state.active_scroll_keys.is_empty(), is_currently_snapped())
+                } else {
+                    (false, false, false)
+                }
+            } else {
+                (false, false, false)
+            };
+        
+            let click_t = if let Some(type_lock) = CLICK_TYPE.get() {
+                if let Ok(t) = type_lock.lock() {
+                    *t
+                } else {
+                    ClickType::None
+                }
+            } else {
+                ClickType::None
+            };
+        
+            let (start_color, end_color) = if click_t == ClickType::Left {
+                (0xFFFF4500, 0xFFFF0000) // Spacebar: Neon Orange to Red
+            } else if click_t == ClickType::Right {
+                (0xFFFFFF00, 0xFFFFAA00) // G Key: Yellow to Gold/Orange
+            } else if click_t == ClickType::Scroll {
+                (0xFF00E5FF, 0xFF0055FF) // QERF: Neon Cyan to Blue
+            } else if is_dragging {
+                (0xFFFF4500, 0xFFFF007F) // Dragging: Neon Orange to Pink-Red
+            } else if is_scrolling {
+                (0xFF00E5FF, 0xFF0055FF) // Scrolling: Neon Cyan to Blue
+            } else if is_snapped {
+                (0xFFFF00FF, 0xFFFF007F) // Snapped: Neon Magenta Gradient
+            } else {
+                (0xFF2FFFAD, 0xFF004D20) // Normal: Neon Green to Dark Green Gradient
+            };
+        
+            // 3. Create linear gradient brush & pen
+            let p1 = PointF { X: 16.0, Y: 16.0 };
+            let p2 = PointF { X: 16.0 + 14.0 * scale_val, Y: 16.0 + 11.0 * scale_val };
+            let mut brush = std::ptr::null_mut();
+            if GdipCreateLineBrush(&p1, &p2, start_color, end_color, 3, &mut brush) == 0 {
+                let mut gradient_pen = std::ptr::null_mut();
+                if GdipCreatePen2(brush, 2.5, 0, &mut gradient_pen) == 0 {
+                    GdipSetPenStartCap(gradient_pen, 2); // LineCapRound = 2
+                    GdipSetPenEndCap(gradient_pen, 2);   // LineCapRound = 2
+                    GdipSetPenLineJoin(gradient_pen, 2);  // LineJoinRound = 2
+        
+                    GdipDrawLineI(graphics, gradient_pen, 16, 16, scale_coord(19, 16), scale_coord(29, 16));
+                    GdipDrawLineI(graphics, gradient_pen, 16, 16, scale_coord(30, 16), scale_coord(27, 16));
+                    GdipDrawLineI(graphics, gradient_pen, scale_coord(18, 16), scale_coord(25, 16), scale_coord(25, 16), scale_coord(14, 16));
+        
+                    GdipDeletePen(gradient_pen);
+                }
+                GdipDeleteBrush(brush);
+            }
+        
+            GdipDeleteGraphics(graphics);
+        }
+    }
+}
+
+/// Render at the final size, with the same vector strokes and anti-aliasing as the overlay.
+pub(crate) fn render_native_cursor_32() -> isize {
+    unsafe {
+        let screen = GetDC(0);
+        let dc = CreateCompatibleDC(screen);
+        let mut bmi: BITMAPINFO = std::mem::zeroed();
+        bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+        bmi.bmiHeader.biWidth = 128;
+        bmi.bmiHeader.biHeight = -128;
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+        let mut bits = std::ptr::null_mut();
+        let high = CreateDIBSection(dc, &bmi, DIB_RGB_COLORS, &mut bits, 0, 0);
+        let mut cursor = 0;
+        if high != 0 && !bits.is_null() {
+            let old = SelectObject(dc, high);
+            std::ptr::write_bytes(bits, 0, 128 * 128 * 4);
+            // Keep all caps inside the canvas and move the hotspot with the artwork.
+            let scale = CLICK_SCALE.get().and_then(|s| s.lock().ok().map(|s| *s)).unwrap_or(1.0);
+            draw_cursor_artwork(dc, 4.0, scale, (-2.0, -1.0));
+            windows_sys::Win32::Graphics::Gdi::GdiFlush();
+            SelectObject(dc, old);
+            bmi.bmiHeader.biWidth = 32;
+            bmi.bmiHeader.biHeight = -32;
+            let mut output = std::ptr::null_mut();
+            let bitmap = CreateDIBSection(dc, &bmi, DIB_RGB_COLORS, &mut output, 0, 0);
+            if bitmap != 0 && !output.is_null() {
+                let source = std::slice::from_raw_parts(bits as *const u32, 128 * 128);
+                let target = std::slice::from_raw_parts_mut(output as *mut u32, 32 * 32);
+                // Average premultiplied BGRA coverage, including alpha, rather than
+                // stretching an already rasterized cursor with CopyImage.
+                for y in 0..32 {
+                    for x in 0..32 {
+                        let mut channels = [0u32; 4];
+                        for dy in 0..4 { for dx in 0..4 {
+                            let pixel = source[(y * 4 + dy) * 128 + x * 4 + dx];
+                            for c in 0..4 { channels[c] += (pixel >> (c * 8)) & 255; }
+                        }}
+                        target[y * 32 + x] = (0..4).fold(0, |pixel, c| pixel | (((channels[c] + 8) / 16) << (c * 8)));
+                    }
+                }
+                let mask_bits = crate::cursor_scheme::transparency_mask(target, 32, 32);
+                let mask = windows_sys::Win32::Graphics::Gdi::CreateBitmap(32, 32, 1, 1, mask_bits.as_ptr() as *const _);
+                if mask != 0 {
+                    let info = windows_sys::Win32::UI::WindowsAndMessaging::ICONINFO {
+                        fIcon: 0, xHotspot: 14, yHotspot: 15, hbmMask: mask, hbmColor: bitmap,
+                    };
+                    cursor = windows_sys::Win32::UI::WindowsAndMessaging::CreateIconIndirect(&info);
+                    DeleteObject(mask);
+                }
+            }
+            if bitmap != 0 { DeleteObject(bitmap); }
+        }
+        if high != 0 { DeleteObject(high); }
+        DeleteDC(dc);
+        ReleaseDC(0, screen);
+        cursor
+    }
+}
+
 fn update_indicator_layered_image(hwnd: HWND) {
     unsafe {
         let dpi_scale = get_indicator_dpi_scale();
@@ -1113,10 +1210,6 @@ fn update_indicator_layered_image(hwnd: HWND) {
             }
         } else {
             1.0
-        };
-
-        let scale_coord = |coord: i32, center: i32| -> i32 {
-            center + ((coord - center) as f32 * scale_val).round() as i32
         };
 
         let hdc_screen = GetDC(0);
@@ -1146,85 +1239,7 @@ fn update_indicator_layered_image(hwnd: HWND) {
             // Fill with completely transparent pixels (alpha = 0)
             std::ptr::write_bytes(bits, 0, (width * height * 4) as usize);
 
-            // Draw cursor using GDI+
-            let mut graphics = std::ptr::null_mut();
-            if GdipCreateFromHDC(hdc_mem, &mut graphics) == 0 {
-                GdipSetSmoothingMode(graphics, SmoothingModeAntiAlias);
-                GdipScaleWorldTransform(graphics, dpi_scale as f32, dpi_scale as f32, 0);
-
-                // 1. Draw high-contrast black border first (4.0px width)
-                let mut black_pen = std::ptr::null_mut();
-                if GdipCreatePen1(0xFF000000, 4.0, 0, &mut black_pen) == 0 {
-                    GdipSetPenStartCap(black_pen, 2); // LineCapRound = 2
-                    GdipSetPenEndCap(black_pen, 2);   // LineCapRound = 2
-                    GdipSetPenLineJoin(black_pen, 2);  // LineJoinRound = 2
-
-                    GdipDrawLineI(graphics, black_pen, 16, 16, scale_coord(19, 16), scale_coord(29, 16));
-                    GdipDrawLineI(graphics, black_pen, 16, 16, scale_coord(30, 16), scale_coord(27, 16));
-                    GdipDrawLineI(graphics, black_pen, scale_coord(18, 16), scale_coord(25, 16), scale_coord(25, 16), scale_coord(14, 16));
-
-                    GdipDeletePen(black_pen);
-                }
-
-                // 2. Determine gradient colors based on state
-                let (is_dragging, is_scrolling, is_snapped) = if let Some(state_arc) = crate::hook::APP_STATE.get() {
-                    if let Ok(state) = state_arc.try_lock() {
-                        (state.is_dragging, !state.active_scroll_keys.is_empty(), is_currently_snapped())
-                    } else {
-                        (false, false, false)
-                    }
-                } else {
-                    (false, false, false)
-                };
-
-                let click_t = if let Some(type_lock) = CLICK_TYPE.get() {
-                    if let Ok(t) = type_lock.lock() {
-                        *t
-                    } else {
-                        ClickType::None
-                    }
-                } else {
-                    ClickType::None
-                };
-
-                let (start_color, end_color) = if click_t == ClickType::Left {
-                    (0xFFFF4500, 0xFFFF0000) // Spacebar: Neon Orange to Red
-                } else if click_t == ClickType::Right {
-                    (0xFFFFFF00, 0xFFFFAA00) // G Key: Yellow to Gold/Orange
-                } else if click_t == ClickType::Scroll {
-                    (0xFF00E5FF, 0xFF0055FF) // QERF: Neon Cyan to Blue
-                } else if is_dragging {
-                    (0xFFFF4500, 0xFFFF007F) // Dragging: Neon Orange to Pink-Red
-                } else if is_scrolling {
-                    (0xFF00E5FF, 0xFF0055FF) // Scrolling: Neon Cyan to Blue
-                } else if is_snapped {
-                    (0xFFFF00FF, 0xFFFF007F) // Snapped: Neon Magenta Gradient
-                } else {
-                    (0xFF2FFFAD, 0xFF004D20) // Normal: Neon Green to Dark Green Gradient
-                };
-
-                // 3. Create linear gradient brush & pen
-                let p1 = PointF { X: 16.0, Y: 16.0 };
-                let p2 = PointF { X: 16.0 + 14.0 * scale_val, Y: 16.0 + 11.0 * scale_val };
-                let mut brush = std::ptr::null_mut();
-                if GdipCreateLineBrush(&p1, &p2, start_color, end_color, 3, &mut brush) == 0 {
-                    let mut gradient_pen = std::ptr::null_mut();
-                    if GdipCreatePen2(brush, 2.5, 0, &mut gradient_pen) == 0 {
-                        GdipSetPenStartCap(gradient_pen, 2); // LineCapRound = 2
-                        GdipSetPenEndCap(gradient_pen, 2);   // LineCapRound = 2
-                        GdipSetPenLineJoin(gradient_pen, 2);  // LineJoinRound = 2
-
-                        GdipDrawLineI(graphics, gradient_pen, 16, 16, scale_coord(19, 16), scale_coord(29, 16));
-                        GdipDrawLineI(graphics, gradient_pen, 16, 16, scale_coord(30, 16), scale_coord(27, 16));
-                        GdipDrawLineI(graphics, gradient_pen, scale_coord(18, 16), scale_coord(25, 16), scale_coord(25, 16), scale_coord(14, 16));
-
-                        GdipDeletePen(gradient_pen);
-                    }
-                    GdipDeleteBrush(brush);
-                }
-
-                GdipDeleteGraphics(graphics);
-            }
+            draw_cursor_artwork(hdc_mem, dpi_scale, scale_val, (0.0, 0.0));
 
             let pt_src = POINT { x: 0, y: 0 };
             let size_wnd = SIZE { cx: width, cy: height };
@@ -1249,6 +1264,9 @@ fn update_indicator_layered_image(hwnd: HWND) {
             );
 
             SelectObject(hdc_mem, old_bitmap);
+            // Reuse the exact visible Keysor artwork for the native remote cursor.
+            windows_sys::Win32::Graphics::Gdi::GdiFlush();
+            crate::cursor_scheme::cache_artwork(h_bitmap, width, height, bits);
             DeleteObject(h_bitmap);
         }
 
@@ -1379,9 +1397,13 @@ enum HudHitTarget {
     EditBaseSpeed = 12,
     EditMaxSpeed = 13,
     EditAcceleration = 14,
+    Support = 15,
 }
 
 fn classify_hit_target(x: i16, y: i16, features_enabled: bool, is_pro: bool) -> HudHitTarget {
+    if (600..=778).contains(&x) && (404..=426).contains(&y) {
+        return HudHitTarget::Support;
+    }
     if !features_enabled {
         if y >= 80 && y <= 344 && x >= 638 && x <= 778 {
             return HudHitTarget::ToggleMagnet;
@@ -1450,306 +1472,6 @@ fn classify_hit_target(x: i16, y: i16, features_enabled: bool, is_pro: bool) -> 
     HudHitTarget::None
 }
 
-struct HudFonts {
-    title: windows_sys::Win32::Graphics::Gdi::HFONT,
-    number: windows_sys::Win32::Graphics::Gdi::HFONT,
-    key: windows_sys::Win32::Graphics::Gdi::HFONT,
-    text: windows_sys::Win32::Graphics::Gdi::HFONT,
-}
-
-impl HudFonts {
-    unsafe fn create(font_name_ptr: *const u16) -> Self {
-        use windows_sys::Win32::Graphics::Gdi::CreateFontW;
-        unsafe {
-            Self {
-                title: CreateFontW(22, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, font_name_ptr),
-                number: CreateFontW(36, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, font_name_ptr),
-                key: CreateFontW(12, 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0, font_name_ptr),
-                text: CreateFontW(13, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, font_name_ptr),
-            }
-        }
-    }
-}
-
-impl Drop for HudFonts {
-    fn drop(&mut self) {
-        unsafe {
-            DeleteObject(self.title);
-            DeleteObject(self.number);
-            DeleteObject(self.key);
-            DeleteObject(self.text);
-        }
-    }
-}
-
-unsafe fn draw_hud_button(
-    hdc: windows_sys::Win32::Graphics::Gdi::HDC,
-    x1: i32,
-    y1: i32,
-    x2: i32,
-    y2: i32,
-    radius: i32,
-    bg_color: u32,
-    border_color: u32,
-    text_color: u32,
-    text: &str,
-    font: windows_sys::Win32::Graphics::Gdi::HFONT,
-    align_flags: u32,
-    text_top_offset: i32,
-) {
-    unsafe {
-        let brush = CreateSolidBrush(bg_color);
-        let old_brush = SelectObject(hdc, brush);
-
-        // border_color가 Neon Lime Green(0xADFF2F)인 경우 입체 그라데이션/베벨 테두리 효과 적용
-        if border_color == 0xADFF2F {
-            // 1. 우하단 그림자 테두리 (Dark Green)
-            let dark_pen = CreatePen(0, 2, 0x004D20);
-            let old_pen = SelectObject(hdc, dark_pen);
-            RoundRect(hdc, x1 + 1, y1 + 1, x2 + 1, y2 + 1, radius, radius);
-            SelectObject(hdc, old_pen);
-            DeleteObject(dark_pen);
-
-            // 2. 좌상단 하이라이트 테두리 (Neon Lime Green)
-            let neon_pen = CreatePen(0, 2, 0xADFF2F);
-            let old_pen = SelectObject(hdc, neon_pen);
-            RoundRect(hdc, x1, y1, x2, y2, radius, radius);
-            SelectObject(hdc, old_pen);
-            DeleteObject(neon_pen);
-        } else {
-            let pen = CreatePen(0, 1, border_color);
-            let old_pen = SelectObject(hdc, pen);
-            RoundRect(hdc, x1, y1, x2, y2, radius, radius);
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
-        }
-
-        SelectObject(hdc, old_brush);
-        DeleteObject(brush);
-
-        let old_font = SelectObject(hdc, font);
-        
-        // text_color가 Neon Lime Green(0xADFF2F)인 경우 입체 그라데이션/그림자 텍스트 효과 적용
-        if text_color == 0xADFF2F {
-            let wide_text = encode_wide(text);
-            
-            // 1. 다크 그린 그림자 레이어
-            SetTextColor(hdc, 0x004D20);
-            let mut r_dark = RECT {
-                left: x1,
-                top: y1 + text_top_offset + 1,
-                right: x2,
-                bottom: y2,
-            };
-            DrawTextW(hdc, wide_text.as_ptr(), wide_text.len() as i32 - 1, &mut r_dark, align_flags);
-
-            // 2. 네온 라임 그린 메인 레이어
-            SetTextColor(hdc, 0xADFF2F);
-            let mut r_neon = RECT {
-                left: x1,
-                top: y1 + text_top_offset,
-                right: x2,
-                bottom: y2,
-            };
-            DrawTextW(hdc, wide_text.as_ptr(), wide_text.len() as i32 - 1, &mut r_neon, align_flags);
-        } else {
-            SetTextColor(hdc, text_color);
-            let wide_text = encode_wide(text);
-            let mut r_text = RECT {
-                left: x1,
-                top: y1 + text_top_offset,
-                right: x2,
-                bottom: y2,
-            };
-            DrawTextW(hdc, wide_text.as_ptr(), wide_text.len() as i32 - 1, &mut r_text, align_flags);
-        }
-        
-        SelectObject(hdc, old_font);
-    }
-}
-
-unsafe fn draw_hud_toggle_row(
-    hdc: windows_sys::Win32::Graphics::Gdi::HDC,
-    x1: i32,
-    y1: i32,
-    x2: i32,
-    y2: i32,
-    radius: i32,
-    is_active: bool,
-    is_hovered: bool,
-    is_enabled: bool,
-    label: &str,
-    font: windows_sys::Win32::Graphics::Gdi::HFONT,
-) {
-    unsafe {
-        if !is_enabled {
-            let brush = CreateSolidBrush(0x121414);
-            let old_brush = SelectObject(hdc, brush);
-            let pen = CreatePen(0, 1, 0x222222);
-            let old_pen = SelectObject(hdc, pen);
-            RoundRect(hdc, x1, y1, x2, y2, radius, radius);
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
-            SelectObject(hdc, old_brush);
-            DeleteObject(brush);
-            return;
-        }
-
-        // 1. 버튼 배경 컨테이너 패널
-        let bg_color = if is_hovered { 0x2A2E2E } else { 0x202424 };
-        let brush = CreateSolidBrush(bg_color);
-        let old_brush = SelectObject(hdc, brush);
-
-        let border_color = if is_hovered {
-            0xADFF2F
-        } else if is_active {
-            0x6EAA20
-        } else {
-            0x3C4040
-        };
-
-        if border_color == 0xADFF2F {
-            let dark_pen = CreatePen(0, 2, 0x004D20);
-            let old_pen = SelectObject(hdc, dark_pen);
-            RoundRect(hdc, x1 + 1, y1 + 1, x2 + 1, y2 + 1, radius, radius);
-            SelectObject(hdc, old_pen);
-            DeleteObject(dark_pen);
-
-            let neon_pen = CreatePen(0, 2, 0xADFF2F);
-            let old_pen = SelectObject(hdc, neon_pen);
-            RoundRect(hdc, x1, y1, x2, y2, radius, radius);
-            SelectObject(hdc, old_pen);
-            DeleteObject(neon_pen);
-        } else {
-            let pen = CreatePen(0, 1, border_color);
-            let old_pen = SelectObject(hdc, pen);
-            RoundRect(hdc, x1, y1, x2, y2, radius, radius);
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
-        }
-
-        SelectObject(hdc, old_brush);
-        DeleteObject(brush);
-
-        // 2. 좌측 텍스트 라벨 (좌측 정렬, 수직 중앙)
-        let old_font = SelectObject(hdc, font);
-        let text_color = if is_active {
-            0xADFF2F
-        } else if is_hovered {
-            0xFFFFFF
-        } else {
-            0xCCCCCC
-        };
-
-        let wide_text = encode_wide(label);
-        if text_color == 0xADFF2F {
-            SetTextColor(hdc, 0x004D20);
-            let mut r_dark = RECT {
-                left: x1 + 10,
-                top: y1 + 1,
-                right: x2 - 44,
-                bottom: y2 + 1,
-            };
-            DrawTextW(hdc, wide_text.as_ptr(), wide_text.len() as i32 - 1, &mut r_dark, 0 | 4 | 32);
-
-            SetTextColor(hdc, 0xADFF2F);
-            let mut r_neon = RECT {
-                left: x1 + 10,
-                top: y1,
-                right: x2 - 44,
-                bottom: y2,
-            };
-            DrawTextW(hdc, wide_text.as_ptr(), wide_text.len() as i32 - 1, &mut r_neon, 0 | 4 | 32);
-        } else {
-            SetTextColor(hdc, text_color);
-            let mut r_text = RECT {
-                left: x1 + 10,
-                top: y1,
-                right: x2 - 44,
-                bottom: y2,
-            };
-            DrawTextW(hdc, wide_text.as_ptr(), wide_text.len() as i32 - 1, &mut r_text, 0 | 4 | 32);
-        }
-        SelectObject(hdc, old_font);
-
-        // 3. 우측 고해상도 안티앨리어싱(GDI+) 토글 스위치 렌더링
-        let mut graphics = std::ptr::null_mut();
-        if GdipCreateFromHDC(hdc, &mut graphics) == 0 {
-            GdipSetSmoothingMode(graphics, SmoothingModeAntiAlias);
-
-            let sw_w: f32 = 32.0;
-            let sw_h: f32 = 18.0;
-            let sw_x: f32 = (x2 as f32) - sw_w - 7.0;
-            let sw_y: f32 = (y1 as f32) + ((y2 - y1) as f32 - sw_h) / 2.0;
-
-            let mut path = std::ptr::null_mut();
-            if GdipCreatePath(0, &mut path) == 0 {
-                let d = sw_h;
-                // 왼쪽 반원 (90도부터 180도)
-                GdipAddPathArc(path, sw_x, sw_y, d, d, 90.0, 180.0);
-                // 오른쪽 반원 (270도부터 180도)
-                GdipAddPathArc(path, sw_x + sw_w - d, sw_y, d, d, 270.0, 180.0);
-                GdipClosePathFigure(path);
-
-                // 트랙 배경 채우기
-                let track_argb: u32 = if is_active {
-                    0xFF2FFFAD // 네온 라임/그린
-                } else {
-                    0xFF32363A // 세련된 다크 트랙
-                };
-                let mut track_brush = std::ptr::null_mut();
-                if GdipCreateSolidFill(track_argb, &mut track_brush) == 0 {
-                    GdipFillPath(graphics, track_brush, path);
-                    GdipDeleteBrush(track_brush);
-                }
-
-                // OFF 상태일 때 부드러운 외곽선 추가
-                if !is_active {
-                    let mut track_pen = std::ptr::null_mut();
-                    if GdipCreatePen1(0xFF4C5258, 1.0, 0, &mut track_pen) == 0 {
-                        GdipDrawPath(graphics, track_pen, path);
-                        GdipDeletePen(track_pen);
-                    }
-                }
-
-                GdipDeletePath(path);
-            }
-
-            // 4. 슬라이딩 원형 노브 (Knob)
-            let knob_d: f32 = sw_h - 4.0; // 14.0px
-            let knob_x: f32 = if is_active {
-                sw_x + sw_w - knob_d - 2.0
-            } else {
-                sw_x + 2.0
-            };
-            let knob_y: f32 = sw_y + 2.0;
-
-            // 노브 부드러운 드롭 섀도우
-            let mut shadow_brush = std::ptr::null_mut();
-            if GdipCreateSolidFill(0x38000000, &mut shadow_brush) == 0 {
-                GdipFillEllipse(graphics, shadow_brush, knob_x, knob_y + 0.8, knob_d, knob_d);
-                GdipDeleteBrush(shadow_brush);
-            }
-
-            // 노브 본체 (순백색)
-            let mut knob_brush = std::ptr::null_mut();
-            if GdipCreateSolidFill(0xFFFFFFFF, &mut knob_brush) == 0 {
-                GdipFillEllipse(graphics, knob_brush, knob_x, knob_y, knob_d, knob_d);
-                GdipDeleteBrush(knob_brush);
-            }
-
-            // 노브 섬세한 테두리
-            let mut knob_pen = std::ptr::null_mut();
-            if GdipCreatePen1(0x20000000, 0.8, 0, &mut knob_pen) == 0 {
-                GdipDrawEllipse(graphics, knob_pen, knob_x, knob_y, knob_d, knob_d);
-                GdipDeletePen(knob_pen);
-            }
-
-            GdipDeleteGraphics(graphics);
-        }
-    }
-}
-
 unsafe extern "system" fn hud_wnd_proc(
     hwnd: HWND,
     msg: u32,
@@ -1758,476 +1480,7 @@ unsafe extern "system" fn hud_wnd_proc(
 ) -> LRESULT {
     unsafe {
         match msg {
-            WM_PAINT => {
-                let mut ps = std::mem::zeroed();
-                let hdc_paint = BeginPaint(hwnd, &mut ps);
-
-                let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-                GetClientRect(hwnd, &mut rect);
-                let width = rect.right;
-                let height = rect.bottom;
-
-                // Double Buffering: Create memory DC & Bitmap compatible with screen DC
-                let hdc = CreateCompatibleDC(hdc_paint);
-                let h_bm = CreateCompatibleBitmap(hdc_paint, width, height);
-                let old_bm = SelectObject(hdc, h_bm);
-
-                // Set GDI mapping mode to automatically scale the 808x452 design coordinates
-                SetMapMode(hdc, MM_ANISOTROPIC);
-                SetWindowExtEx(hdc, 808, 452, std::ptr::null_mut());
-                SetViewportExtEx(hdc, width, height, std::ptr::null_mut());
-
-                let bg_brush = CreateSolidBrush(0x121210);
-                let border_pen = CreatePen(0, 2, 0xADFF2F);
-                
-                let old_brush = SelectObject(hdc, bg_brush);
-                let old_pen = SelectObject(hdc, border_pen);
-                
-                RoundRect(hdc, 0, 0, 808, 452, 16, 16);
-                
-                SetBkMode(hdc, 1);
-                
-                let font_name = encode_wide("Segoe UI");
-                let fonts = HudFonts::create(font_name.as_ptr());
-
-                let pm_enabled = {
-                    let state_arc = crate::hook::APP_STATE.get();
-                    state_arc.map_or(false, |arc| arc.lock().unwrap().config.settings.pixel_mode.unwrap_or(false))
-                };
-                let lang_en = {
-                    let state_arc = crate::hook::APP_STATE.get();
-                    state_arc.map_or(false, |arc| arc.lock().unwrap().config.settings.lang_en.unwrap_or(false))
-                };
-                let (is_pro, is_trial) = {
-                    let state_arc = crate::hook::APP_STATE.get();
-                    state_arc.map_or((false, false), |arc| {
-                        let state = arc.lock().unwrap();
-                        (state.is_pro, state.is_trial)
-                    })
-                };
-
-                let q_desc = if lang_en { "Scl ◀" } else { "◀스크롤" };
-                let w_desc = if lang_en { "Up ▲" } else { "▲ 이동" };
-                let e_desc = if lang_en { "Scl ▶" } else { "스크롤▶" };
-                let r_desc = if lang_en { "Whl ▲" } else { "휠▲" };
-                let caps_desc = if lang_en { "ON/OFF" } else { "온/오프" };
-                let a_desc = if lang_en { "Left ◀" } else { "◀ 이동" };
-                let s_desc = if lang_en { "Down ▼" } else { "▼ 이동" };
-                let d_desc = if lang_en { "Right ▶" } else { "▶ 이동" };
-                let f_desc = if lang_en { "Whl ▼" } else { "휠▼" };
-                let g_desc = if lang_en { "R-Clk" } else { "우클릭" };
-                let space_desc = if lang_en { "Left Click (1:L / 2:Db / +Shift:Enter)" } else { "좌클릭 (1:일반 / 2:더블 / +Shift:엔터)" };
-                
-                let title_text = if is_pro {
-                    if lang_en {
-                        format!("Keysor, Keyboard & Cursor as One!")
-                    } else {
-                        format!("Keysor, 키보드와 커서를 하나로!")
-                    }
-                } else if is_trial {
-                    if let Some(days) = crate::license::get_remaining_trial_days() {
-                        if lang_en {
-                            format!("Keysor Trial ({} days left)", days)
-                        } else {
-                            format!("키서 평가판 ({}일 남음)", days)
-                        }
-                    } else if lang_en {
-                        format!("Keysor Free (Trial Expired)")
-                    } else {
-                        format!("키서 무료 버전 (평가판 만료)")
-                    }
-                } else if lang_en {
-                    format!("Keysor Free (Trial Expired)")
-                } else {
-                    format!("키서 무료 버전 (평가판 만료)")
-                };
-                let speed_sens_title = "SPEED SENS";
-                
-                let info1_text = if lang_en {
-                    "※ All alphabet typing is blocked during mouse mode (except Ctrl/Alt/Win shortcuts)."
-                } else {
-                    "※ 마우스 모드 중 모든 알파벳 키 타이핑은 차단됩니다 (Ctrl, Alt, Win 단축키 예외 허용)."
-                };
-                let info2_text = if lang_en {
-                    "• Press Caps Lock again to return to normal keyboard mode."
-                } else {
-                    "• Caps Lock을 한 번 더 누르면 일반 키보드 상태로 복귀합니다."
-                };
-                let info_close_text = if lang_en {
-                    "• Automatically minimizes when mouse mode is active."
-                } else {
-                    "• 마우스 활성화 시 자동으로 최소화 됩니다."
-                };
-
-
-                let old_font = SelectObject(hdc, fonts.title);
-                let title = encode_wide(&title_text);
-                // 1. 타이틀 그림자 레이어 (좌측 정렬)
-                SetTextColor(hdc, 0x004D20);
-                let mut r_title_dark = RECT { left: 30, top: 31, right: 420, bottom: 61 };
-                DrawTextW(hdc, title.as_ptr(), title.len() as i32 - 1, &mut r_title_dark, 0 | 32);
-
-                // 2. 타이틀 메인 레이어 (네온 라임 그린)
-                SetTextColor(hdc, 0xADFF2F); // Neon Lime Green title
-                let mut r_title = RECT { left: 30, top: 30, right: 420, bottom: 60 };
-                DrawTextW(hdc, title.as_ptr(), title.len() as i32 - 1, &mut r_title, 0 | 32);
-
-                // Draw Top Right: Buy Pro and Register License Buttons (Y = 30 ~ 50)
-                let hover_val = HUD_HOVER.load(Ordering::SeqCst);
-                
-                // 10. Buy Pro Button
-                let buy_top_label = if is_pro {
-                    if lang_en { "Pro Active" } else { "프로 활성화" }
-                } else if lang_en {
-                    "Buy Pro"
-                } else {
-                    "프로 결제하기"
-                };
-                let (buy_top_bg, buy_top_border, buy_top_text_color) = if is_pro {
-                    (0x181818, 0x222222, 0xADFF2F) // Keycolor text, dark bg when active/non-clickable
-                } else if hover_val == 10 {
-                    (0x3C4040, 0xADFF2F, 0xADFF2F)
-                } else {
-                    (0x202424, 0x3C4040, 0x888888)
-                };
-                draw_hud_button(hdc, 430, 30, 540, 50, 6, buy_top_bg, buy_top_border, buy_top_text_color, buy_top_label, fonts.key, 37, 0);
-
-                // 11. Register License Button
-                let lic_top_label = if lang_en { "License" } else { "라이센스 등록" };
-                let (lic_top_bg, lic_top_border, lic_top_text_color) = if hover_val == 11 {
-                    (0x3C4040, 0xADFF2F, 0xADFF2F)
-                } else {
-                    (0x202424, 0x3C4040, 0x888888)
-                };
-                draw_hud_button(hdc, 546, 30, 656, 50, 6, lic_top_bg, lic_top_border, lic_top_text_color, lic_top_label, fonts.key, 37, 0);
-
-                // Draw Minimize and Close Buttons in top right corner
-                // Draw Language Toggle Button
-                let (lang_bg, lang_border, lang_text_color) = if hover_val == 6 {
-                    (0x3C4040, 0xADFF2F, 0xADFF2F)
-                } else {
-                    (0x202424, 0x3C4040, 0x888888)
-                };
-                let lang_btn_text = if lang_en { "KO" } else { "EN" };
-                draw_hud_button(hdc, 662, 30, 712, 50, 6, lang_bg, lang_border, lang_text_color, lang_btn_text, fonts.key, 37, 0);
-                
-                // Draw Minimize Button
-                let (min_bg, min_border, min_text_color) = if hover_val == 1 {
-                    (0x3C4040, 0xADFF2F, 0xADFF2F)
-                } else {
-                    (0x202424, 0x3C4040, 0x888888)
-                };
-                draw_hud_button(hdc, 742, 10, 767, 30, 6, min_bg, min_border, min_text_color, "-", fonts.title, 37, 0);
-
-                // Draw Close Button
-                let (close_bg, close_border, close_text_color) = if hover_val == 2 {
-                    (0x1A1A40, 0x0045FF, 0x0045FF)
-                } else {
-                    (0x202424, 0x3C4040, 0x888888)
-                };
-                draw_hud_button(hdc, 773, 10, 798, 30, 6, close_bg, close_border, close_text_color, "X", fonts.key, 37, 0);
-                
-                // Row 1: Numbers (Y = 80)
-                draw_key_cap(hdc, fonts.key, 30, 80, 48, 48, "~", "", 0);
-                draw_key_cap(hdc, fonts.key, 84, 80, 48, 48, "1", "", 0);
-                draw_key_cap(hdc, fonts.key, 138, 80, 48, 48, "2", "", 0);
-                draw_key_cap(hdc, fonts.key, 192, 80, 48, 48, "3", "", 0);
-                draw_key_cap(hdc, fonts.key, 246, 80, 48, 48, "4", "", 0);
-                draw_key_cap(hdc, fonts.key, 300, 80, 48, 48, "5", "", 0);
-                draw_key_cap(hdc, fonts.key, 354, 80, 48, 48, "6", "", 0);
-                draw_key_cap(hdc, fonts.key, 408, 80, 48, 48, "7", "", 0);
-                draw_key_cap(hdc, fonts.key, 462, 80, 48, 48, "8", "", 0);
-                draw_key_cap(hdc, fonts.key, 516, 80, 48, 48, "9", "", 0);
-                draw_key_cap(hdc, fonts.key, 570, 80, 48, 48, "0", "", 0);
-
-                // Row 2: Q Row (Y = 134)
-                draw_key_cap(hdc, fonts.key, 30, 134, 72, 48, "Tab", "", 0);
-                draw_key_cap(hdc, fonts.key, 108, 134, 48, 48, "Q", q_desc, 3);
-                draw_key_cap(hdc, fonts.key, 162, 134, 48, 48, "W", w_desc, 2);
-                draw_key_cap(hdc, fonts.key, 216, 134, 48, 48, "E", e_desc, 3);
-                draw_key_cap(hdc, fonts.key, 270, 134, 48, 48, "R", r_desc, 3);
-                draw_key_cap(hdc, fonts.key, 324, 134, 48, 48, "T", "", 0);
-                draw_key_cap(hdc, fonts.key, 378, 134, 48, 48, "Y", "", 0);
-                draw_key_cap(hdc, fonts.key, 432, 134, 48, 48, "U", "", 0);
-                draw_key_cap(hdc, fonts.key, 486, 134, 48, 48, "I", "", 0);
-                draw_key_cap(hdc, fonts.key, 540, 134, 48, 48, "O", "", 0);
-
-                // Row 3: A Row (Y = 188)
-                draw_key_cap(hdc, fonts.key, 30, 188, 84, 48, "Caps", caps_desc, 1);
-                draw_key_cap(hdc, fonts.key, 120, 188, 48, 48, "A", a_desc, 2);
-                draw_key_cap(hdc, fonts.key, 174, 188, 48, 48, "S", s_desc, 2);
-                draw_key_cap(hdc, fonts.key, 228, 188, 48, 48, "D", d_desc, 2);
-                draw_key_cap(hdc, fonts.key, 282, 188, 48, 48, "F", f_desc, 3);
-                draw_key_cap(hdc, fonts.key, 336, 188, 48, 48, "G", g_desc, 5);
-                draw_key_cap(hdc, fonts.key, 390, 188, 48, 48, "H", "", 0);
-                let j_desc = if lang_en { "◀Tab" } else { "◀크롬탭" };
-                let k_desc = if lang_en { "Tab▶" } else { "크롬탭▶" };
-                draw_key_cap(hdc, fonts.key, 444, 188, 48, 48, "J", j_desc, 6);
-                draw_key_cap(hdc, fonts.key, 498, 188, 48, 48, "K", k_desc, 6);
-                draw_key_cap(hdc, fonts.key, 552, 188, 48, 48, "L", "", 0);
-
-                // Row 4: Z Row & Enter (Y = 242)
-                let shift_desc = if lang_en {
-                    "+Q/E Back/Fwd\n+J/K Desktops"
-                } else {
-                    "+Q/E 뒤로/앞으로\n+J/K 데스크탑 이동"
-                };
-                draw_key_cap(hdc, fonts.key, 30, 242, 102, 48, "Shift", &shift_desc, 6);
-                draw_key_cap(hdc, fonts.key, 138, 242, 48, 48, "Z", "", 0);
-                draw_key_cap(hdc, fonts.key, 192, 242, 48, 48, "X", "", 0);
-                draw_key_cap(hdc, fonts.key, 246, 242, 48, 48, "C", "", 0);
-                draw_key_cap(hdc, fonts.key, 300, 242, 48, 48, "V", "", 0);
-                draw_key_cap(hdc, fonts.key, 354, 242, 48, 48, "B", "", 0);
-                draw_key_cap(hdc, fonts.key, 408, 242, 48, 48, "N", "", 0);
-                draw_key_cap(hdc, fonts.key, 462, 242, 48, 48, "M", "", 0);
-                draw_key_cap(hdc, fonts.key, 516, 242, 48, 48, "<", "", 0);
-
-                // Row 5: Modifier & Space (Y = 296)
-                draw_key_cap(hdc, fonts.key, 30, 296, 48, 48, "Ctrl", "", 0);
-                draw_key_cap(hdc, fonts.key, 84, 296, 48, 48, "Win", "", 0);
-                draw_key_cap(hdc, fonts.key, 138, 296, 48, 48, "Alt", "", 0);
-                draw_key_cap(hdc, fonts.key, 192, 296, 264, 48, "Spacebar", space_desc, 4);
-                draw_key_cap(hdc, fonts.key, 462, 296, 48, 48, "Alt", "", 0);
-                draw_key_cap(hdc, fonts.key, 516, 296, 48, 48, "Win", "", 0);
-
-                // Draw Speed Sensitivity Panel
-                let features_enabled = is_pro || is_trial;
-                let box_bg = if features_enabled { 0x161818 } else { 0x0D0E0E };
-                let box_brush = CreateSolidBrush(box_bg);
-                let old_box_brush = SelectObject(hdc, box_brush);
-
-                // 1. 스피드센서 박스 그림자 테두리
-                let shadow_color = if features_enabled { 0x004D20 } else { 0x1A1C1C };
-                let dark_box_pen = CreatePen(0, 2, shadow_color);
-                let old_box_pen = SelectObject(hdc, dark_box_pen);
-                RoundRect(hdc, 638 + 1, 80 + 1, 778 + 1, 344 + 1, 12, 12);
-                SelectObject(hdc, old_box_pen);
-                DeleteObject(dark_box_pen);
-
-                // 2. 스피드센서 박스 하이라이트 테두리
-                let border_color = if features_enabled { 0xADFF2F } else { 0x3C4040 };
-                let neon_box_pen = CreatePen(0, 2, border_color);
-                let old_box_pen = SelectObject(hdc, neon_box_pen);
-                RoundRect(hdc, 638, 80, 778, 344, 12, 12);
-                SelectObject(hdc, old_box_pen);
-                DeleteObject(neon_box_pen);
-
-                SelectObject(hdc, old_box_brush);
-                DeleteObject(box_brush);
-
-                let sens_title = encode_wide(speed_sens_title);
-                let old_font_title = SelectObject(hdc, fonts.title);
-                // 1. SPEED SENS 타이틀 그림자 레이어
-                SetTextColor(hdc, if features_enabled { 0x004D20 } else { 0x151515 });
-                let mut r_sens_title_dark = RECT { left: 638, top: 88, right: 778, bottom: 106 };
-                DrawTextW(hdc, sens_title.as_ptr(), sens_title.len() as i32 - 1, &mut r_sens_title_dark, 1 | 4);
-
-                // 2. SPEED SENS 타이틀 메인 레이어
-                SetTextColor(hdc, if features_enabled { 0xADFF2F } else { 0x444444 });
-                let mut r_sens_title = RECT { left: 638, top: 87, right: 778, bottom: 105 };
-                DrawTextW(hdc, sens_title.as_ptr(), sens_title.len() as i32 - 1, &mut r_sens_title, 1 | 4);
-                SelectObject(hdc, old_font_title);
-
-                // 3. 디스플레이 화면 전용 내부 박스 (LCD Screen: Y: 114 ~ 150, 하단 버튼과 4px 타이트 여백)
-                let disp_bg = if features_enabled { 0x090B0B } else { 0x070808 };
-                let disp_brush = CreateSolidBrush(disp_bg);
-                let old_disp_brush = SelectObject(hdc, disp_brush);
-                
-                let disp_border = if features_enabled { 0x2A3030 } else { 0x1A1C1C };
-                let disp_pen = CreatePen(0, 1, disp_border);
-                let old_disp_pen = SelectObject(hdc, disp_pen);
-                
-                RoundRect(hdc, 646, 114, 770, 150, 5, 5);
-                
-                SelectObject(hdc, old_disp_pen);
-                DeleteObject(disp_pen);
-                SelectObject(hdc, old_disp_brush);
-                DeleteObject(disp_brush);
-
-                let show_all = SHOW_ALL_SENS.load(Ordering::SeqCst);
-                if show_all {
-                    let (base_speed, max_speed, accel) = {
-                        let state_arc = crate::hook::APP_STATE.get();
-                        state_arc.map_or((1.0, 30.0, 1.5), |arc| {
-                            let state = arc.lock().unwrap();
-                            if state.is_pro || state.is_trial {
-                                (
-                                    state.config.settings.base_speed,
-                                    state.config.settings.max_speed,
-                                    state.config.settings.acceleration,
-                                )
-                            } else {
-                                (1.0, 30.0, 1.5)
-                            }
-                        })
-                    };
-                    
-                    let old_font_txt = SelectObject(hdc, fonts.text);
-                    SetTextColor(hdc, if is_pro || is_trial { 0xFFFFFF } else { 0x444444 });
-                    
-                    let line1 = encode_wide(&format!("Base: {:.1}", base_speed));
-                    let mut r_l1 = RECT { left: 652, top: 118, right: 708, bottom: 133 };
-                    DrawTextW(hdc, line1.as_ptr(), line1.len() as i32 - 1, &mut r_l1, 0);
-                    
-                    let line2 = encode_wide(&format!("Max: {:.1}", max_speed));
-                    let mut r_l2 = RECT { left: 708, top: 118, right: 764, bottom: 133 };
-                    DrawTextW(hdc, line2.as_ptr(), line2.len() as i32 - 1, &mut r_l2, 0);
-                    
-                    let line3 = encode_wide(&format!("Accel: {:.1}", accel));
-                    let mut r_l3 = RECT { left: 652, top: 134, right: 764, bottom: 149 };
-                    DrawTextW(hdc, line3.as_ptr(), line3.len() as i32 - 1, &mut r_l3, 0);
-                    
-                    SelectObject(hdc, old_font_txt);
-                } else {
-                    let sens_val = {
-                        let state_arc = crate::hook::APP_STATE.get();
-                        state_arc.map_or(1.0, |arc| {
-                            let state = arc.lock().unwrap();
-                            if state.is_pro || state.is_trial {
-                                state.config.settings.base_speed
-                            } else {
-                                1.0
-                            }
-                        })
-                    };
-                    let old_font_number = SelectObject(hdc, fonts.number);
-                    SetTextColor(hdc, if is_pro || is_trial { 0xFFFFFF } else { 0x444444 });
-                    let sens_val_text = encode_wide(&format!("{:.1}", sens_val));
-                    let mut r_sens_val = RECT { left: 646, top: 113, right: 770, bottom: 149 };
-                    DrawTextW(hdc, sens_val_text.as_ptr(), sens_val_text.len() as i32 - 1, &mut r_sens_val, 1 | 32 | 4);
-                    SelectObject(hdc, old_font_number);
-                }
-
-                let hover_val = HUD_HOVER.load(Ordering::SeqCst);
-                
-                // Draw [-] Button
-                let (dec_bg, dec_border, dec_text_color) = if !(is_pro || is_trial) {
-                    (0x121414, 0x222222, 0x333333)
-                } else if hover_val == 3 {
-                    (0x3C4040, 0xADFF2F, 0xADFF2F)
-                } else {
-                    (0x202424, 0x3C4040, 0x888888)
-                };
-                draw_hud_button(hdc, 648, 154, 703, 186, 5, dec_bg, dec_border, dec_text_color, "-", fonts.title, 37, -3);
-
-                // Draw [+] Button
-                let (inc_bg, inc_border, inc_text_color) = if !(is_pro || is_trial) {
-                    (0x121414, 0x222222, 0x333333)
-                } else if hover_val == 4 {
-                    (0x3C4040, 0xADFF2F, 0xADFF2F)
-                } else {
-                    (0x202424, 0x3C4040, 0x888888)
-                };
-                draw_hud_button(hdc, 713, 154, 768, 186, 5, inc_bg, inc_border, inc_text_color, "+", fonts.title, 37, -4);
-
-                let features_enabled = is_pro || is_trial;
-
-                // 1. Draw Grid Mode Toggle Button
-                let pm_enabled = {
-                    let state_arc = crate::hook::APP_STATE.get();
-                    state_arc.map_or(false, |arc| arc.lock().unwrap().config.settings.pixel_mode.unwrap_or(false))
-                };
-                let pm_label_str = if lang_en { "Grid Mode" } else { "그리드 모드" };
-                draw_hud_toggle_row(hdc, 648, 191, 768, 223, 5, pm_enabled, hover_val == 5, features_enabled, pm_label_str, fonts.key);
-
-                // 2. Draw Magnet Mode Toggle Button
-                let magnet_enabled = {
-                    let state_arc = crate::hook::APP_STATE.get();
-                    state_arc.map_or(false, |arc| arc.lock().unwrap().config.settings.magnetic_mode.unwrap_or(false))
-                };
-                let mag_label_str = if lang_en { "Magnet Mode" } else { "자석 모드" };
-                draw_hud_toggle_row(hdc, 648, 228, 768, 260, 5, magnet_enabled, hover_val == 7, features_enabled, mag_label_str, fonts.key);
-
-                // 3. Draw Auto-Start Toggle Button
-                let autostart_enabled = check_autostart_status_win();
-                let auto_label_str = if lang_en { "Auto-Start" } else { "자동 실행" };
-                draw_hud_toggle_row(hdc, 648, 265, 768, 297, 5, autostart_enabled, hover_val == 9, features_enabled, auto_label_str, fonts.key);
-
-                // 4. Draw Details Toggle Button
-                let sens_info_enabled = SHOW_ALL_SENS.load(Ordering::SeqCst);
-                let (si_bg, si_border, si_text_color) = if !(is_pro || is_trial) {
-                    (0x121414, 0x222222, 0x333333)
-                } else if sens_info_enabled {
-                    if hover_val == 8 { (0xBCFF7A, 0xADFF2F, 0x000000) } else { (0xADFF2F, 0x3C4040, 0x000000) }
-                } else {
-                    if hover_val == 8 { (0x3C4040, 0xADFF2F, 0xFFFFFF) } else { (0x202424, 0x3C4040, 0x888888) }
-                };
-                let si_label_str = if !(is_pro || is_trial) {
-                    ""
-                } else if sens_info_enabled {
-                    if lang_en { "Standard" } else { "기본보기" }
-                } else {
-                    if lang_en { "Details" } else { "상세보기" }
-                };
-                draw_hud_button(hdc, 648, 302, 768, 334, 5, si_bg, si_border, si_text_color, si_label_str, fonts.key, 37, 0);
-
-                if !(is_pro || is_trial) {
-                    let lock_icon = encode_wide("🔒");
-                    let old_font_icon = SelectObject(hdc, fonts.title);
-                    SetTextColor(hdc, 0x777777);
-                    let mut r_lock_icon = RECT { left: 638, top: 200, right: 778, bottom: 235 };
-                    DrawTextW(hdc, lock_icon.as_ptr(), lock_icon.len() as i32 - 1, &mut r_lock_icon, 1 | 32);
-                    SelectObject(hdc, old_font_icon);
-                    
-                    let lock_msg = if lang_en {
-                        encode_wide("PRO ONLY")
-                    } else {
-                        encode_wide("프로 전용")
-                    };
-                    let old_font_msg = SelectObject(hdc, fonts.key);
-                    SetTextColor(hdc, 0x888888);
-                    let mut r_lock_msg = RECT { left: 638, top: 240, right: 778, bottom: 270 };
-                    DrawTextW(hdc, lock_msg.as_ptr(), lock_msg.len() as i32 - 1, &mut r_lock_msg, 1 | 32);
-                    SelectObject(hdc, old_font_msg);
-                }
-
-
-
-                // 4. Draw Info Footer & Warnings
-                let old_font_txt = SelectObject(hdc, fonts.text);
-                SetTextColor(hdc, 0x888888);
-                
-                let info1 = encode_wide(info1_text);
-                let mut r_info1 = RECT { left: 30, top: 366, right: 778, bottom: 384 };
-                DrawTextW(hdc, info1.as_ptr(), info1.len() as i32 - 1, &mut r_info1, 0);
-
-                let info2 = encode_wide(info2_text);
-                let mut r_info2 = RECT { left: 30, top: 385, right: 778, bottom: 403 };
-                DrawTextW(hdc, info2.as_ptr(), info2.len() as i32 - 1, &mut r_info2, 0);
-                
-                let info_close = encode_wide(info_close_text);
-                let mut r_info_close = RECT { left: 30, top: 404, right: 778, bottom: 422 };
-                DrawTextW(hdc, info_close.as_ptr(), info_close.len() as i32 - 1, &mut r_info_close, 0);
-                
-                // Draw version text at the bottom-right corner
-                let version_str = format!("v{}", env!("CARGO_PKG_VERSION"));
-                let version_w = encode_wide(&version_str);
-                let mut r_version = RECT { left: 600, top: 404, right: 778, bottom: 422 };
-                SetTextColor(hdc, 0x666666); // Darker gray for subtle version label
-                DrawTextW(hdc, version_w.as_ptr(), version_w.len() as i32 - 1, &mut r_version, 2 | 32);
-
-                SelectObject(hdc, old_font_txt);
-
-                // Cleanup GDI
-                SelectObject(hdc, old_font);
-                
-                SelectObject(hdc, old_brush);
-                SelectObject(hdc, old_pen);
-                DeleteObject(bg_brush);
-                DeleteObject(border_pen);
-
-                // Restore memory DC mapping mode to MM_TEXT to copy pixels 1:1 without void stretching
-                SetMapMode(hdc, MM_TEXT);
-
-                // Double Buffering: Copy offscreen bitmap to screen DC, and delete compatibility objects
-                BitBlt(hdc_paint, 0, 0, width, height, hdc, 0, 0, SRCCOPY);
-                SelectObject(hdc, old_bm);
-                DeleteObject(h_bm);
-                DeleteDC(hdc);
-
-                EndPaint(hwnd, &ps);
-                0
-            }
+            WM_PAINT => hud::paint(hwnd),
 
             windows_sys::Win32::UI::WindowsAndMessaging::WM_MOUSEMOVE => {
                 let x = (lparam & 0xFFFF) as i16;
@@ -2369,6 +1622,9 @@ unsafe extern "system" fn hud_wnd_proc(
                             .spawn()
                             .ok();
                         InvalidateRect(hwnd, std::ptr::null(), 0);
+                    }
+                    HudHitTarget::Support => {
+                        crate::support::show(lang_en);
                     }
                     HudHitTarget::LicenseTop => {
                         prompt_license_input(hwnd, lang_en);
@@ -2565,7 +1821,7 @@ pub fn start_indicator() {
         let hud_hwnd = CreateWindowExW(
             WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
             hud_class_name.as_ptr(),
-            std::ptr::null(),
+            encode_wide("Keysor HUD").as_ptr(),
             WS_POPUP,
             hud_x,
             hud_y,
@@ -2587,7 +1843,7 @@ pub fn start_indicator() {
 
 
         // 타이머 제거, 최초 팝업 상시 노출
-        if should_show_hud() {
+        if should_show_hud(true) {
             ShowWindow(hud_hwnd, SW_SHOWNA);
         }
         InvalidateRect(hud_hwnd, std::ptr::null(), 0);
@@ -2634,7 +1890,22 @@ pub fn force_restore_system_cursor() {
     }
 }
 
+fn custom_cursor_needed_now() -> bool {
+    let mouse_mode = crate::hook::APP_STATE.get()
+        .and_then(|state| state.lock().ok().map(|state| state.is_mouse_mode))
+        .unwrap_or(false);
+    if !mouse_mode { return false; }
+    let foreground = unsafe { GetForegroundWindow() };
+    let (process, class) = cached_foreground_window_info(foreground);
+    // A shortcut alone is not a system popup. Decide from current state, not the
+    // state when an asynchronous style/recovery message was queued.
+    !unsafe { is_system_shell_foreground_with_info(foreground, &process, &class) }
+}
+
 fn restore_native_pointer_on_ui_thread() {
+    let custom = custom_cursor_needed_now();
+    crate::cursor_scheme::set_custom(custom);
+    if custom { return; }
     static LAST_RESTORE: OnceLock<Mutex<Option<std::time::Instant>>> = OnceLock::new();
     let mut last = LAST_RESTORE.get_or_init(|| Mutex::new(None)).lock().unwrap();
     if last.is_some_and(|time| time.elapsed() < std::time::Duration::from_millis(250)) {
@@ -2643,12 +1914,7 @@ fn restore_native_pointer_on_ui_thread() {
     *last = Some(std::time::Instant::now());
     drop(last);
         unsafe {
-            windows_sys::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(
-                windows_sys::Win32::UI::WindowsAndMessaging::SPI_SETCURSORS,
-                0,
-                std::ptr::null_mut(),
-                0,
-            );
+            crate::cursor_scheme::restore();
             windows_sys::Win32::UI::Input::KeyboardAndMouse::mouse_event(
                 windows_sys::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_MOVE,
                 0,
@@ -2657,6 +1923,13 @@ fn restore_native_pointer_on_ui_thread() {
                 0,
             );
         }
+}
+
+/// Explicitly reopen the HUD without changing mouse mode or CapsLock state.
+pub fn request_open_hud() {
+    if let Some(&main) = MAIN_HWND.get() {
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(main, WM_KEYSOR_OPEN_HUD, 0, 0); }
+    }
 }
 
 pub fn show_indicator() {
@@ -2720,6 +1993,29 @@ unsafe fn get_process_name_from_window(hwnd: HWND) -> String {
 
 
 #[cfg(test)]
+mod hud_visibility_tests {
+    use super::hud_can_open;
+
+    #[test]
+    fn startup_and_taskbar_restore_open_hud_even_in_mouse_mode() {
+        assert!(hud_can_open(false, true, true));
+        assert!(hud_can_open(false, false, true));
+    }
+
+    #[test]
+    fn automatic_activation_does_not_reopen_suppressed_hud() {
+        assert!(!hud_can_open(false, true, false));
+        assert!(hud_can_open(false, false, false));
+    }
+
+    #[test]
+    fn license_input_keeps_hud_hidden() {
+        assert!(!hud_can_open(true, true, true));
+        assert!(!hud_can_open(true, false, true));
+    }
+}
+
+#[cfg(test)]
 mod shell_cursor_tests {
     use super::shell_surface_needs_native_cursor;
 
@@ -2746,6 +2042,23 @@ mod shell_cursor_tests {
     }
 
     #[test]
+    fn cursor_policy_keeps_remote_overlay_and_system_fallback() {
+        for native in [Some(true), Some(false), None] {
+            assert_eq!(super::should_display_overlay(true, false, native, true), native == Some(false));
+            for remote in [false, true] {
+                assert!(!super::should_display_overlay(false, false, native, remote));
+                assert!(!super::should_display_overlay(true, true, native, remote));
+            }
+        }
+        assert!(!super::should_display_overlay(true, false, Some(true), false));
+        assert!(!super::should_display_overlay(true, false, None, false));
+        assert!(super::should_display_overlay(true, false, Some(false), false));
+        assert!(!super::native_cursor_visible(3, true));
+        assert!(!super::native_cursor_visible(1, false));
+        assert!(super::native_cursor_visible(1, true));
+    }
+
+    #[test]
     fn native_cursor_recovery_uses_os_state() {
         assert!(super::native_pointer_needs_refresh(0, true));
         assert!(super::native_pointer_needs_refresh(2, true));
@@ -2754,19 +2067,32 @@ mod shell_cursor_tests {
     }
 }
 
-fn native_pointer_needs_refresh(flags: u32, has_cursor: bool) -> bool {
-    flags & windows_sys::Win32::UI::WindowsAndMessaging::CURSOR_SHOWING == 0 || !has_cursor
+fn native_cursor_visible(flags: u32, has_cursor: bool) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{CURSOR_SHOWING, CURSOR_SUPPRESSED};
+    flags & CURSOR_SHOWING != 0 && flags & CURSOR_SUPPRESSED == 0 && has_cursor
 }
 
-fn ensure_native_pointer_visible() {
+fn native_pointer_needs_refresh(flags: u32, has_cursor: bool) -> bool {
+    !native_cursor_visible(flags, has_cursor)
+}
+
+fn query_native_cursor_visible() -> Option<bool> {
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::{CURSORINFO, GetCursorInfo};
         let mut info: CURSORINFO = std::mem::zeroed();
         info.cbSize = std::mem::size_of::<CURSORINFO>() as u32;
-        if GetCursorInfo(&mut info) != 0 && native_pointer_needs_refresh(info.flags, info.hCursor != 0) {
-            force_restore_system_cursor();
-        }
+        (GetCursorInfo(&mut info) != 0).then(|| native_cursor_visible(info.flags, info.hCursor != 0))
     }
+}
+
+fn should_display_overlay(mouse_mode: bool, suspended: bool, native_visible: Option<bool>, remote_mode: bool) -> bool {
+    let _ = remote_mode;
+    // Native cursor carries Keysor artwork; never add an overlay over a visible pointer.
+    mouse_mode && !suspended && native_visible == Some(false)
+}
+
+fn ensure_native_pointer_visible() {
+    if query_native_cursor_visible() != Some(true) { force_restore_system_cursor(); }
 }
 
 fn process_has_uiaccess() -> bool {
@@ -2802,6 +2128,23 @@ unsafe fn is_system_shell_foreground_with_info(hwnd: HWND, proc_name: &str, clas
 
         shell_surface_needs_native_cursor(proc_name, class_name)
     }
+}
+
+fn cached_foreground_window_info(hwnd: HWND) -> (String, String) {
+    struct Cache { hwnd: HWND, at: std::time::Instant, details: (String, String) }
+    static CACHE: OnceLock<Mutex<Option<Cache>>> = OnceLock::new();
+    let mut cache = CACHE.get_or_init(|| Mutex::new(None)).lock().unwrap();
+    let now = std::time::Instant::now();
+    if let Some(cached) = cache.as_ref() {
+        if cached.hwnd == hwnd && now.duration_since(cached.at) < std::time::Duration::from_secs(1) {
+            return cached.details.clone();
+        }
+    }
+    #[cfg(test)]
+    DETAIL_QUERY_COUNT.fetch_add(1, Ordering::Relaxed);
+    let details = get_foreground_window_info(hwnd);
+    *cache = Some(Cache { hwnd, at: now, details: details.clone() });
+    details
 }
 
 fn get_foreground_window_info(fore_hwnd: HWND) -> (String, String) {
@@ -2858,32 +2201,125 @@ fn write_debug_log(
     }
 }
 
-fn handle_cursor_visibility(hwnd: HWND, current_mouse_mode: bool, is_suspended: bool, is_visible: &mut bool) -> bool {
-    static LAST_FALLBACK_WINDOW: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+fn apply_overlay_visibility(hwnd: HWND, show: bool, is_visible: &mut bool) -> bool {
     unsafe {
-        // Keep the native pointer available when the overlay cannot be displayed.
-        ensure_native_pointer_visible();
-        let fallback_window = if is_suspended { GetForegroundWindow() } else { 0 };
-        if LAST_FALLBACK_WINDOW.swap(fallback_window, Ordering::SeqCst) != fallback_window && is_suspended {
-            // A transparent cursor may still report CURSOR_SHOWING; refresh on shell entry too.
-            force_restore_system_cursor();
-        }
-        if current_mouse_mode && !is_suspended {
+        if show {
             if !*is_visible {
                 update_indicator_layered_image(hwnd);
-                windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNA);
+                ShowWindow(hwnd, SW_SHOWNA);
                 *is_visible = windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0;
             }
-            // Allow the subsequent SWP_SHOWWINDOW even if the first show was ignored.
+            // The positioning path also uses SWP_SHOWWINDOW if an initial show was ignored.
             true
         } else {
             if *is_visible {
-                windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE);
+                ShowWindow(hwnd, SW_HIDE);
                 *is_visible = false;
             }
             false
         }
     }
+}
+
+#[derive(Default)]
+struct CursorStyleSchedule {
+    last: Option<((bool, HWND, (bool, bool)), std::time::Instant)>,
+}
+impl CursorStyleSchedule {
+    fn due(&self, key: (bool, HWND, (bool, bool)), now: std::time::Instant) -> bool {
+        self.last.as_ref().is_none_or(|(old, at)| *old != key
+            || now.saturating_duration_since(*at) >= std::time::Duration::from_secs(1))
+    }
+    fn sent(&mut self, key: (bool, HWND, (bool, bool)), now: std::time::Instant) { self.last = Some((key, now)); }
+}
+
+fn request_cursor_style_update(mouse_mode: bool) {
+    static SCHEDULE: OnceLock<Mutex<CursorStyleSchedule>> = OnceLock::new();
+    let key = (mouse_mode, unsafe { GetForegroundWindow() }, crate::cursor_scheme::status());
+    let now = std::time::Instant::now();
+    let mut schedule = SCHEDULE.get_or_init(|| Mutex::new(CursorStyleSchedule::default())).lock().unwrap();
+    if !schedule.due(key, now) { return; }
+    if let Some(&main) = MAIN_HWND.get() {
+        if !CURSOR_STYLE_PENDING.swap(true, Ordering::SeqCst) {
+            let posted = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(main, WM_KEYSOR_CURSOR_STYLE, 0, 0) != 0 };
+            if posted { schedule.sent(key, now); }
+            else { CURSOR_STYLE_PENDING.store(false, Ordering::SeqCst); }
+        }
+    }
+}
+
+fn handle_cursor_visibility(hwnd: HWND, current_mouse_mode: bool, is_suspended: bool, is_visible: &mut bool) -> bool {
+    static LAST_FALLBACK_WINDOW: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+    request_cursor_style_update(current_mouse_mode);
+    let native_visible = query_native_cursor_visible();
+    let show_overlay = should_display_overlay(current_mouse_mode, is_suspended, native_visible, crate::platform::windows::chrome_remote_mode());
+    // Hide the overlay before requesting any native recovery, never blank the OS cursor.
+    let show_overlay = apply_overlay_visibility(hwnd, show_overlay, is_visible);
+    if !show_overlay {
+        let fallback_window = if is_suspended { unsafe { GetForegroundWindow() } } else { 0 };
+        let entering_fallback = LAST_FALLBACK_WINDOW.swap(fallback_window, Ordering::SeqCst) != fallback_window && is_suspended;
+        if entering_fallback { force_restore_system_cursor(); }
+        else if !current_mouse_mode || is_suspended || native_visible.is_none() { ensure_native_pointer_visible(); }
+    } else {
+        LAST_FALLBACK_WINDOW.store(0, Ordering::SeqCst);
+    }
+    show_overlay
+}
+
+#[cfg(test)]
+pub(crate) fn assert_cursor_style_update_budget() {
+    let updates = STYLE_UPDATE_COUNT.load(Ordering::Relaxed);
+    let queries = DETAIL_QUERY_COUNT.load(Ordering::Relaxed);
+    for _ in 0..100 {
+        request_cursor_style_update(true);
+        cached_foreground_window_info(unsafe { GetForegroundWindow() });
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    assert!(STYLE_UPDATE_COUNT.load(Ordering::Relaxed) - updates <= 3,
+        "100 idle requests must not produce 100 UI style messages");
+    assert!(DETAIL_QUERY_COUNT.load(Ordering::Relaxed) - queries <= 2,
+        "The movement and UI paths must share cached foreground details");
+}
+
+#[cfg(test)]
+pub(crate) fn assert_no_normal_mode_cursor_restore() {
+    assert!(custom_cursor_needed_now());
+    crate::cursor_scheme::set_custom(true);
+    assert!(crate::cursor_scheme::status().1);
+    let before = crate::cursor_scheme::restore_count();
+    for _ in 0..20 {
+        force_restore_system_cursor();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert!(crate::cursor_scheme::status().1);
+    }
+    assert_eq!(crate::cursor_scheme::restore_count(), before,
+        "Delayed recovery must not restore the default cursor on ordinary surfaces");
+}
+
+#[cfg(test)]
+pub(crate) fn assert_single_cursor_windows() {
+    let hwnd = *INDICATOR_HWND.get().expect("Indicator window");
+    let previous_remote = crate::platform::windows::chrome_remote_mode();
+    for remote in [false, true] {
+      crate::platform::windows::set_chrome_remote_mode(remote);
+      for (mouse_mode, suspended) in [(true, false), (true, true), (true, false), (false, false)] {
+        for _ in 0..5 {
+            let mut visible = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0 };
+            if handle_cursor_visibility(hwnd, mouse_mode, suspended, &mut visible) {
+                update_overlay_window_position(hwnd, false);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let visible = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0 };
+        if !should_display_overlay(mouse_mode, suspended, query_native_cursor_visible(), remote) {
+            assert!(!visible, "Overlay must be hidden when the native cursor is available or required");
+        } else {
+            assert!(visible, "Overlay must remain available in CRD or when Windows suppresses its cursor");
+        }
+      }
+    }
+    crate::platform::windows::set_chrome_remote_mode(previous_remote);
 }
 
 fn update_click_scale() -> bool {
@@ -2988,56 +2424,23 @@ fn check_state_changed(is_space_down: bool, is_right_down: bool, is_dragging: bo
 
 /// 실제 물리 키 상태를 스캔하여 락(Lock)이 걸린 모디파이어 키 상태 동기화
 fn check_and_sync_physical_modifiers(is_shortcut_active: &mut bool) {
-    if *is_shortcut_active {
-        unsafe {
-            let ctrl_down = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x11) as u32 & 0x8000) != 0;
-            let menu_down = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x12) as u32 & 0x8000) != 0;
-            let lwin_down = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x5B) as u32 & 0x8000) != 0;
-            let rwin_down = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x5C) as u32 & 0x8000) != 0;
-            if !ctrl_down && !menu_down && !lwin_down && !rwin_down {
-                *is_shortcut_active = false;
-                if let Some(state_arc) = crate::hook::APP_STATE.get() {
-                    if let Ok(mut state) = state_arc.try_lock() {
-                        state.ctrl_pressed = false;
-                        state.alt_pressed = false;
-                        state.win_pressed = false;
-                    }
-                }
-            }
+    if !*is_shortcut_active { return; }
+    let Some(state_arc) = crate::hook::APP_STATE.get() else { return; };
+    let Ok(mut state) = state_arc.try_lock() else { return; };
+    // Read and repair under one lock so a new modifier keydown cannot be erased
+    // between the physical-state observation and the recovery operation.
+    unsafe {
+        let down = |vk| (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(vk) as u16 & 0x8000) != 0;
+        if !down(0x11) && !down(0x12) && !down(0x5B) && !down(0x5C) {
+            state.clear_released_shortcut_modifiers();
+            *is_shortcut_active = false;
         }
     }
 }
 
 /// 포그라운드 윈도우 정보를 기준으로 서스펜드(일시정지) 판단
 fn resolve_foreground_suspend_state(fore_hwnd: HWND, is_shortcut_active: bool) -> (String, String, bool) {
-    static LAST_FORE_HWND: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    static CACHED_PROC: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-    static CACHED_CLASS: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-
-    let last_hwnd = LAST_FORE_HWND.load(std::sync::atomic::Ordering::SeqCst) as HWND;
-    let (proc_name, class_name) = if fore_hwnd == last_hwnd {
-        let proc_lock = CACHED_PROC.get_or_init(|| Mutex::new(None));
-        let class_lock = CACHED_CLASS.get_or_init(|| Mutex::new(None));
-        let p = proc_lock.lock().unwrap().clone();
-        let c = class_lock.lock().unwrap().clone();
-        if p.is_some() && c.is_some() {
-            (p.unwrap(), c.unwrap())
-        } else {
-            let (p_new, c_new) = unsafe { get_foreground_window_info(fore_hwnd) };
-            *proc_lock.lock().unwrap() = Some(p_new.clone());
-            *class_lock.lock().unwrap() = Some(c_new.clone());
-            LAST_FORE_HWND.store(fore_hwnd as usize, std::sync::atomic::Ordering::SeqCst);
-            (p_new, c_new)
-        }
-    } else {
-        let (p_new, c_new) = unsafe { get_foreground_window_info(fore_hwnd) };
-        let proc_lock = CACHED_PROC.get_or_init(|| Mutex::new(None));
-        let class_lock = CACHED_CLASS.get_or_init(|| Mutex::new(None));
-        *proc_lock.lock().unwrap() = Some(p_new.clone());
-        *class_lock.lock().unwrap() = Some(c_new.clone());
-        LAST_FORE_HWND.store(fore_hwnd as usize, std::sync::atomic::Ordering::SeqCst);
-        (p_new, c_new)
-    };
+    let (proc_name, class_name) = cached_foreground_window_info(fore_hwnd);
 
     let is_shell_active = unsafe { is_system_shell_foreground_with_info(fore_hwnd, &proc_name, &class_name) };
     let is_hide_suspended = SUSPEND_CURSOR_HIDE.load(Ordering::SeqCst);
@@ -3083,21 +2486,44 @@ fn update_overlay_window_position(hwnd: HWND, scale_changed_in_loop: bool) {
         unsafe { update_indicator_layered_image(hwnd) };
     }
 
+    // Native cursors use the same animation frames even while the overlay is hidden.
+    if query_native_cursor_visible() != Some(false) {
+        let mut visible = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0 };
+        apply_overlay_visibility(hwnd, false, &mut visible);
+        return;
+    }
+
     let current_size = (32.0 * current_dpi_scale) as i32;
+    let next_position = (next_x.round() as i32, next_y.round() as i32, current_size);
+    static LAST_OVERLAY_PLACEMENT: OnceLock<Mutex<Option<((i32, i32, i32), HWND, std::time::Instant)>>> = OnceLock::new();
+    let placement = LAST_OVERLAY_PLACEMENT.get_or_init(|| Mutex::new(None));
+    let foreground = unsafe { GetForegroundWindow() };
+    let should_position = if let Ok(mut last) = placement.lock() {
+        let now = std::time::Instant::now();
+        let changed = last.as_ref().is_none_or(|(position, window, raised_at)| {
+            *position != next_position || *window != foreground || raised_at.elapsed() >= std::time::Duration::from_millis(250)
+        });
+        if changed {
+            *last = Some((next_position, foreground, now));
+        }
+        changed
+    } else {
+        true
+    };
 
     unsafe {
-        windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos(
-            hwnd,
-            windows_sys::Win32::UI::WindowsAndMessaging::HWND_TOPMOST,
-            next_x.round() as i32,
-            next_y.round() as i32,
-            current_size,
-            current_size,
-            windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOACTIVATE
-                | windows_sys::Win32::UI::WindowsAndMessaging::SWP_SHOWWINDOW,
-        );
-        windows_sys::Win32::Graphics::Gdi::InvalidateRect(hwnd, std::ptr::null(), 0);
-        windows_sys::Win32::Graphics::Gdi::UpdateWindow(hwnd);
+        if should_position || windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) == 0 {
+            windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos(
+                hwnd,
+                windows_sys::Win32::UI::WindowsAndMessaging::HWND_TOPMOST,
+                next_position.0,
+                next_position.1,
+                current_size,
+                current_size,
+                windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOACTIVATE
+                    | windows_sys::Win32::UI::WindowsAndMessaging::SWP_SHOWWINDOW,
+            );
+        }
     }
 }
 
@@ -3110,7 +2536,7 @@ pub fn update_indicator_position() {
             else { return; };
 
             if !is_mouse_mode {
-                force_restore_system_cursor();
+                            force_restore_system_cursor();
                 if windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0 {
                     windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE);
                 }
@@ -3140,7 +2566,8 @@ pub fn update_indicator_position() {
 
             // 5. 창 가시성 및 시스템 커서 토글 처리
             let mut is_visible = windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) != 0;
-            if !handle_cursor_visibility(hwnd, is_mouse_mode, is_suspended, &mut is_visible) {
+            handle_cursor_visibility(hwnd, is_mouse_mode, is_suspended, &mut is_visible);
+            if is_suspended {
                 return;
             }
 
@@ -3236,5 +2663,60 @@ pub fn is_snap_flyout_active() -> bool {
             return true;
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod support_entry_tests {
+    use super::*;
+    #[test]
+    fn support_is_accessible_for_free_trial_and_pro() {
+        for (features, pro) in [(false, false), (true, false), (true, true)] {
+            assert_eq!(classify_hit_target(700, 414, features, pro), HudHitTarget::Support);
+            assert_ne!(classify_hit_target(700, 390, features, pro), HudHitTarget::Support);
+        }
+    }
+}
+
+#[cfg(test)]
+mod cursor_schedule_tests {
+    use super::*;
+    #[test]
+    fn idle_hundred_hz_updates_are_bounded_but_transitions_are_immediate() {
+        let now = std::time::Instant::now();
+        let key = (true, 100, (true, true));
+        let mut schedule = CursorStyleSchedule::default();
+        let mut sends = 0;
+        for tick in 0..1000 {
+            let time = now + std::time::Duration::from_millis(tick * 10);
+            if schedule.due(key, time) { sends += 1; schedule.sent(key, time); }
+        }
+        assert_eq!(sends, 10, "Idle requests should be once per second rather than every frame");
+        let time = now + std::time::Duration::from_millis(9991);
+        for changed in [(false, 100, (true, true)), (true, 200, (true, true)), (true, 100, (true, false))] {
+            assert!(schedule.due(changed, time));
+        }
+    }
+}
+
+#[cfg(test)]
+mod hud_render_tests {
+    use super::*;
+    #[test]
+    #[ignore = "Renders a standalone HUD for pixel regression comparison; no hooks, clipboard or settings changes"]
+    fn native_hud_rendering_preview() {
+        unsafe {
+            let instance = windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null());
+            let name = encode_wide("KeysorHudRenderTest");
+            let class = WNDCLASSW { lpfnWndProc: Some(hud_wnd_proc), hInstance: instance,
+                lpszClassName: name.as_ptr(), ..std::mem::zeroed() };
+            RegisterClassW(&class);
+            let hwnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, name.as_ptr(), name.as_ptr(),
+                WS_POPUP, 20, 20, 808, 452, 0, 0, instance, std::ptr::null());
+            assert_ne!(hwnd, 0);
+            ShowWindow(hwnd, SW_SHOWNA); UpdateWindow(hwnd);
+            crate::ui::test_capture::save_window_bitmap(hwnd, "target/hud-render-preview.bmp");
+            windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(hwnd);
+        }
     }
 }

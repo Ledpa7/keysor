@@ -7,25 +7,40 @@ const VERSION_CHECK_URL: &str = "https://api.github.com/repos/Ledpa7/keysor/rele
 const DOWNLOAD_PAGE: &str = "https://keysor.ledpa7.com";
 
 /// 비동기로 버전 체크를 수행합니다.
+static CHECKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub fn check_for_updates_async() {
-    thread::spawn(move || {
-        // 프로그램 시작 직후 네트워크 지연 및 프로세스 안정화를 위해 5초 대기 후 시작
+    thread::spawn(|| {
         thread::sleep(Duration::from_secs(5));
-        
-        println!("[Update] Checking for updates...");
-        if let Some(latest_version) = fetch_latest_version() {
-            println!("[Update] Latest version on GitHub: v{}, Current version: v{}", latest_version, CURRENT_VERSION);
-            if is_newer_version(&latest_version, CURRENT_VERSION) {
-                println!("[Update] New version detected! Prompting user...");
-                prompt_update_dialog(&latest_version);
-            } else {
-                println!("[Update] Keysor is up to date.");
-            }
-        } else {
-            println!("[Update] Failed to fetch latest version info.");
-        }
+        check_for_updates(false);
     });
 }
+
+pub fn check_for_updates_manually() {
+    thread::spawn(|| check_for_updates(true));
+}
+
+fn check_for_updates(manual: bool) {
+    use std::sync::atomic::Ordering;
+    if CHECKING.swap(true, Ordering::SeqCst) { return; }
+    match fetch_latest_version() {
+        Some(version) if is_newer_version(&version, CURRENT_VERSION) => prompt_update_dialog(&version),
+        Some(_) if manual => show_update_status("You are using the latest version. / 최신 버전입니다."),
+        None if manual => show_update_status("Could not check for updates. Check your connection and try again. / 업데이트를 확인하지 못했습니다. 연결을 확인한 뒤 다시 시도하세요."),
+        _ => {}
+    }
+    CHECKING.store(false, Ordering::SeqCst);
+}
+
+#[cfg(windows)]
+fn show_update_status(text: &str) {
+    let text: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
+    let title: Vec<u16> = "Keysor Update".encode_utf16().chain(Some(0)).collect();
+    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(0, text.as_ptr(), title.as_ptr(), 0x40); }
+}
+
+#[cfg(not(windows))]
+fn show_update_status(text: &str) { println!("{text}"); }
 
 /// GitHub API를 통해 최신 버전을 획득합니다.
 fn fetch_latest_version() -> Option<String> {
@@ -112,4 +127,16 @@ fn prompt_update_dialog(new_version: &str) {
 #[cfg(not(windows))]
 fn prompt_update_dialog(new_version: &str) {
     println!("[Update] New version v{} is available. Please download from: {}", new_version, DOWNLOAD_PAGE);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn release_version_comparison() {
+        assert!(is_newer_version("v1.0.2", "1.0.1"));
+        assert!(!is_newer_version("1.0.2", "1.0.2"));
+        assert!(!is_newer_version("1.0.1", "1.0.2"));
+        assert!(!is_newer_version("invalid", "1.0.2"));
+    }
 }

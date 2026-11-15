@@ -15,6 +15,10 @@ const KEYSOR_SIGNATURE: usize = 0xFA17CAFE;
 const CRD_SIGNATURE: usize = 0x43524430;
 static CHROME_REMOTE_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+pub fn chrome_remote_mode() -> bool {
+    CHROME_REMOTE_MODE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 pub fn set_chrome_remote_mode(enabled: bool) {
     CHROME_REMOTE_MODE.store(enabled, std::sync::atomic::Ordering::Relaxed);
 }
@@ -58,6 +62,14 @@ unsafe extern "system" fn low_level_keyboard_proc(
         if is_remote_lock_sync(vk_code, kbd_struct.scan_code, kbd_struct.flags,
             kbd_struct.dw_extra_info, CHROME_REMOTE_MODE.load(std::sync::atomic::Ordering::Relaxed)) {
             crate::diagnostics::record_remote_lock_sync();
+            // CRD can send a virtual CapsLock transition after the physical key.
+            let owns_caps_lock = crate::hook::APP_STATE.get()
+                .and_then(|state| state.try_lock().ok()
+                    .map(|state| crate::hook::uses_native_caps_lock(&state.config)))
+                .unwrap_or(true);
+            if owns_caps_lock {
+                return 1;
+            }
             return unsafe { CallNextHookEx(0, code, wparam, lparam) };
         }
         let is_keyup = wparam == WM_KEYUP as usize || wparam == WM_SYSKEYUP as usize;
@@ -76,7 +88,11 @@ unsafe extern "system" fn low_level_keyboard_proc(
         };
 
         if let Some(cb) = HOOK_CALLBACK.get() {
-            match cb(event) {
+            let result = cb(event);
+            crate::diagnostics::record_transition(vk_code, is_keydown, is_keyup,
+                is_injected, kbd_struct.flags & 0x10 != 0,
+                kbd_struct.dw_extra_info == CRD_SIGNATURE, matches!(result, HookResult::Pass));
+            match result {
                 HookResult::Block => {
                     #[cfg(debug_assertions)]
                     println!("[Hook Debug] HookResult::Block returned for vk_code={}", vk_code);
@@ -98,6 +114,22 @@ unsafe extern "system" fn low_level_keyboard_proc(
 #[cfg(test)]
 mod remote_tests {
     use super::*;
+    #[test]
+    fn remote_sync_is_blocked_before_reaching_windows() {
+        set_chrome_remote_mode(true);
+        let event = KBD_STRUCT_MINIMAL {
+            vk_code: VK_CAPITAL as u32,
+            scan_code: 0,
+            flags: 0x10,
+            time: 0,
+            dw_extra_info: CRD_SIGNATURE,
+        };
+        let result = unsafe {
+            low_level_keyboard_proc(0, WM_KEYDOWN as usize, &event as *const _ as LPARAM)
+        };
+        set_chrome_remote_mode(false);
+        assert_eq!(result, 1);
+    }
     #[test]
     fn remote_sync_does_not_toggle_mouse_mode() {
         assert!(is_remote_lock_sync(0x14, 0, 0x10, CRD_SIGNATURE, false));

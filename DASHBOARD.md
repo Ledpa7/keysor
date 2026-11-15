@@ -4,6 +4,329 @@
 
 ---
 
+## 2026-11-16 자체 점검 (검사 범위 통과)
+
+- 일반 회귀 테스트55개 통과: `target/self-check-tests.log`. 실제 커서/팝업/IME/UIA/진단 검사는 `target/self-check-native.ps1`로7개를 각 독립 프로세스에서 실행하도록 준비했다. 설치 바이너리 일치 확인 후 실행 중인 정식 키서를 잠시 종료하고, 검사 성공/실패와 무관하게 정식 키서를 재실행한다. 클립보드를 덮어쓰는 지원 복사 검사는 제외한다.
+- 사용자 승인 후 Windows 검사7개 모두 통과. 실행기의 PowerShell5 표준 오류/종료 코드 수집 문제는 앱 실패와 구분했다. 각 테스트의 Rust 성공 요약으로 검증했으며 원본 `target/self-check-result.json`은 보존하고 최종 결과는 `target/self-check-verified.json`에 저장했다.
+- 설치 메인/Guardian 해시 일치, 설정 해시/바로가기 인수 유지, 화면 비교 동일(HUD 전체/Win 안내창 시계 제외) 확인. 정식 키서 PID53464/Guardian PID49632 재실행 및 ready=true/independent=true. 버전1.0.3 유지. 자세한 결과/검증 한계는 `SELF_TEST_REPORT.md`.
+- **이전 로그 해석 정정:** `caps_down` 뒤 mouse_mode=false→true 기록만으로 OFF가 취소됐다고 단정할 수 없다. native Caps ON 전환도 Windows 처리를 기다리는 동안 false를 유지한 뒤 true가 되는 설계이며 기존 단위 검사로 확인된다. 진단에는 콜백 처리 전 모드가 없으므로 사용자가 OFF를 요청한 것인지 구분되지 않는다. 이전에 이 기록을 확정된 재활성화 문제로 설명한 것은 근거가 부족했다. 첫 영문 출력은 여전히 미재현/원인 미확정이다.
+
+## 2026-11-16 높은 우선순위 병목 최적화 (1.0.3 적용 완료)
+
+### 작업 목적과 범위
+
+이전 성능 분석에서 개선 필요성이 **높음**인 두 경로만 최적화했다. 입력 처리에 영향을 줄 수 있는 **진단 중 공용 상태 잠금**과, 전역 자석 기능을 사용할 때의 **UI Automation(UIA) 탐색 비용**이 대상이다. 가독성을 유지하기 위해 역할이 드러나는 작은 자료형과 조회 전용 모듈로 구현했다.
+
+| 구분 | 변경한 부분 | 유지한 부분 |
+| --- | --- | --- |
+| 진단 | 입력 상태 복사와 OS 조회의 잠금 범위 분리 | 기록 항목, 초당 10회/5분 주기, 잠금 획득 실패 시 샘플 건너뛰기 |
+| 전역 자석 탐색 | 필요한 속성 일괄 캐시, 최종 대상 200개 판정 후 중단 | 대상 종류, 판정 규칙, 반환 순서, 탐색 깊이/영역, 갱신 조건 |
+| 사용자 기능 | 기능 변경 없음 | CapsLock 팝업 0.5초, Win 안내 1초, 화면 배치와 단축키 |
+| 배포 | 같은 정식 위치에 수정 빌드 적용 | 버전 1.0.3, 설정 파일, 바탕화면 바로가기와 원격 실행 인수 |
+
+중간/낮음으로 평가한 동작 큐, 라이선스 네트워크 요청, 작은 메모리 복사 등은 이번 작업에서 변경하지 않았다.
+
+### 1. 진단 코드의 입력 상태 잠금 축소
+
+**변경 전:** `AppState` 잠금을 잡은 채 마우스 모드/보조키를 읽고, Windows 커서·창·프로세스 정보 조회와 JSON 생성까지 수행했다. 키보드 훅도 같은 상태에 접근하므로, OS 조회가 늦어지면 입력 처리가 잠금을 기다릴 수 있었다.
+
+**변경 후:** `InputSnapshot`에 마우스 모드, Caps 누름 여부, Ctrl/Alt/Win의 불리언 5개만 복사한다. `snapshot_input()`이 반환할 때 잠금이 해제되고, `collect_cursor_snapshot()`은 복사본으로 OS 조회와 JSON 생성을 수행한다.
+
+```text
+이전: 잠금 → 입력 상태 읽기 → Windows 조회 → JSON 생성 → 잠금 해제
+이후: 잠금 → 값 5개 복사 → 잠금 해제 → Windows 조회 → JSON 생성
+```
+
+효과의 근거는 입력 잠금의 수명이 짧아진다는 점이다. Windows 조회 자체를 생략한 것이 아니라, 외부 조회 비용이 입력 처리의 잠금 대기로 이어지는 구간을 분리했다. OS 상태 전체와 입력 상태를 동시에 고정한 원자적 스냅샷은 아니며, 두 상태의 관측 시점에는 차이가 있을 수 있다.
+
+구현: `src/diagnostics.rs`의 `InputSnapshot`, `snapshot_input()`, `capture_cursor_snapshot()`, `collect_cursor_snapshot()`.
+
+### 2. UIA 탐색 속성의 일괄 조회
+
+**변경 전:** 탐색 결과의 요소마다 위치·종류·ID·이름을 개별 조회했다. 속성 조회는 다른 프로세스의 UI 제공자와 통신할 수 있으므로 요소 수가 많으면 비용이 누적된다. 모든 결과의 판정을 끝낸 다음 최종 좌표를 200개로 잘랐다.
+
+**변경 후:** `TargetReader`가 UI Automation BuildCache로 필요한 속성을 묶어서 가져온다.
+
+| 조회 용도 | 캐시하는 속성 | 객체 모드 | 이유 |
+| --- | --- | --- | --- |
+| 트리 탐색 | 위치, 컨트롤 종류 | Full | 하위 요소 탐색을 계속할 수 있어야 함 |
+| 일반 최종 대상 판정 | 위치, AutomationId, 이름 | None | 좌표/이름만 읽으며 실제 UI 조작용 참조는 필요 없음 |
+| 작업 표시줄 대상 판정 | 위치 | None | 기존 판정은 위치만으로 처리할 수 있음 |
+
+캐시는 매 탐색에서 얻는 요소의 새 스냅샷이며, 이전 창의 속성을 계속 재사용하지 않는다. 캐시 생성·검색·속성 조회가 실패하거나 속성이 빠졌으면 기존 개별 조회로 돌아간다. 유효한 대상 200개를 얻으면 나머지 결과의 판정을 중단하므로, 기존의 앞 200개 반환 정책을 유지하면서 불필요한 후처리를 줄인다.
+
+**최초 UI 트리 검색 전체를 200노드로 제한한 것은 아니다.** 제공자와 최초 트리 검색 비용은 남아 있다. 임의의 노드 제한으로 기존 대상을 놓치게 하는 방식은 적용하지 않았다.
+
+구현: `src/ui/win_uia/targets.rs`의 `TargetReader`, `property_cache()`, `scan_window_targets()` 및 `src/ui/win_uia.rs`의 탐색 호출부.
+
+근거: [Microsoft UI Automation 캐싱 문서](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-cachingforclients)는 속성별 교차 프로세스 호출 비용과 일괄 조회의 효과를 설명한다.
+
+### 3. 변경 전후 정량 비교
+
+아래는 **최적화 작업 당시 보고한 기준 측정값**이다. 이후 자체 점검으로 벤치마크 파일을 재생성할 수 있으므로, 최신 단일 실행값과 이 기준값을 혼동하지 않는다.
+
+| 항목 | 변경 전 중앙값 | 변경 후 중앙값 | 절대 차이 | 해석 |
+| --- | ---: | ---: | ---: | --- |
+| 진단 입력 잠금 구간 | 76.6μs | 0.3μs | 76.3μs 감소 | 잠금 구간 약 99.6% 감소 |
+| 진단 조회 전체 | 76.8μs | 76.0μs | 0.8μs 감소 | 전체 작업 시간은 거의 같음 |
+| 일반창 UI 탐색 | 772.416ms | 725.508ms | 46.908ms 감소 | 해당 실험에서 약 6.1% 단축 |
+| 브라우저형 타이틀바 탐색 | 425.609ms | 421.747ms | 3.862ms 감소 | 약 0.9%, 뚜렷한 개선으로 판단하지 않음 |
+| 작업 표시줄형 탐색 | 661.627ms | 656.712ms | 4.915ms 감소 | 약 0.7%, 뚜렷한 개선으로 판단하지 않음 |
+
+측정 방법:
+
+- 진단은 실제 Windows API를 호출하는 동일 조회를 100회 비교했다. 기존 기준 경로는 조회 종료까지 잠금을 유지하고, 최적화 경로는 실제 `snapshot_input()`으로 잠금을 먼저 해제한다.
+- UIA는 버튼 240개가 있는 임시 네이티브 창을 만들고 경로별 7회씩 실행해 중앙값을 비교했다. 실행 순서는 번갈아 바꿔 순서에 따른 영향을 줄였다.
+- UIA 캐시 비교의 양쪽 경로 모두 같은 대상 판정과 200개 판정 제한을 사용했다. 따라서 기존 코드의 200개 이후 추가 판정을 중단하는 효과는 이 수치에 포함하지 않았다.
+- 테스트는 `KEYSOR_TEST_BUILD=1`의 debug 빌드다. 실제 Chrome이나 실제 작업 표시줄을 측정한 것이 아니라, 임시 창을 각 탐색 분기로 처리했다.
+
+**해석상 한계:** 입력 잠금 시간이 99.6% 줄었다고 앱 전체 CPU가 99.6% 줄거나 타자 반응이 같은 비율로 빨라졌다는 뜻은 아니다. 실제 경쟁 중인 키 입력 지연, 최악 지연, 릴리스 앱의 CPU·메모리·배터리·네트워크 사용량은 별도 측정하지 않았다. 1% 안팎의 탐색 시간 차이는 측정 변동일 수 있다. 측정 당시 사용자 설정에서는 전역 자석 기능이 꺼져 있었으며, UIA 최적화는 그 기능을 켰을 때 적용된다.
+
+### 4. 기능 보존과 검증 결과
+
+- 변경 전후 일반 회귀 테스트 **55개 통과**.
+- 최적화 단계의 Windows 검사 **3개 통과**: 입력 잠금 해제/필드 일치, UIA 대상 좌표·순서 일치, 캐시 속성 누락 시 기존 조회 복귀.
+- 일반창/브라우저형/작업 표시줄형 탐색에서 동일한 대상 좌표와 순서를 확인하고 최종 200개 제한을 검사했다.
+- 기존 300ms 점검, 이동 시 900ms 제한, 정기 재탐색과 클릭 갱신 조건은 변경하지 않았다.
+- 후속 자체 점검에서도 일반 **55개**, Windows 통합 **7개**가 통과했다. 실제 커서·팝업 검사와 기본 화면 비교도 수행했다. 클립보드를 덮어쓰는 지원 정보 복사 검사는 제외했다.
+- 메인 HUD 808×452는 픽셀 차이가 없었고, Win 안내창 870×300은 현재 시간·날짜 영역을 제외하면 차이가 없었다. 모든 DPI·앱·원격 입력·라이선스 상태 조합을 실제 사용으로 검증한 것은 아니다.
+
+### 5. 설치 및 실행 확인 이력
+
+- 릴리스와 `dist/Keysor-Setup-1.0.3.exe` 빌드 성공 후, 사용자 UAC 승인으로 `C:\Program Files\Keysor\standard`에 적용했다.
+- 최적화 빌드 ID: **`b3abd0e64cb4a481`**. 버전은 사용자 방침에 따라 **1.0.3 유지**.
+- 설치 직후 메인 PID56996/Guardian PID57728, 독립 실행/준비 상태를 확인했다.
+- 후속 자체 점검 후 메인 PID53464/Guardian PID49632로 정식 경로에서 재실행했다. PID는 해당 점검 시점의 기록이며 고정값이 아니다.
+- 설치된 메인/Guardian의 SHA256이 빌드 결과와 일치했고, 설정 파일 해시 및 바탕화면 바로가기를 보존했다. 바로가기 대상은 정식 실행 파일, 인수는 `--chrome-remote --diagnose-input`이다.
+- 자체 점검에서 이전 정식 메인 종료 후 Guardian의 `restore_ok=true`도 확인했다.
+
+### 6. 확인되지 않은 사항과 정정
+
+첫 글자만 영문으로 나오는 현상은 이번 최적화나 자동 검사로 재현·원인 확정·해결하지 못했다. 앞서 `caps_down` 이후 mouse_mode=false→true 로그를 모드 OFF 취소라고 설명했지만, 정상적인 ON 전환도 같은 중간 상태를 가질 수 있다. 전환 전 상태가 기록되지 않아 구분할 수 없으므로, 확정된 재활성화 버그라는 해석은 정정한다.
+
+자체 점검 실행기의 PowerShell5 출력/종료 코드 수집 문제는 앱의 테스트 실패와 구분했다. 개별 Rust 테스트의 최종 성공 요약으로 검증했고, 원본 결과와 검증 결과를 모두 보존했다.
+
+### 7. 상세 문서와 근거 파일
+
+| 용도 | 파일 |
+| --- | --- |
+| 최적화 상세 설명 | [PERFORMANCE_OPTIMIZATION.md](PERFORMANCE_OPTIMIZATION.md) |
+| 구조 변경 및 이유 | [REFACTORING.md](REFACTORING.md) |
+| 자체 점검 결과와 검증 한계 | [SELF_TEST_REPORT.md](SELF_TEST_REPORT.md) |
+| 변경 전후 일반 검사 | `target/priority-perf-before-tests.log`, `target/priority-perf-tests.log` |
+| Windows 최적화 검사 | `target/priority-perf-input-native.log`, `target/priority-perf-uia-native.log`, `target/priority-perf-fallback-native.log` |
+| 벤치마크 원자료 | `target/priority-perf-input-benchmark.json`, `target/priority-perf-uia-benchmark.json` — 재실행 시 갱신 가능 |
+| 빌드/설치 | `target/priority-perf-package.log`, `target/priority-perf-install.json` |
+| 자체 점검 최종 결과 | `target/self-check-verified.json`, `target/self-check-tests.log` |
+| 자체 점검 실행기 원본 | `target/self-check-result.json` |
+| Windows 통합 검사 로그 | `target/self-check-native-1.log` ~ `target/self-check-native-7.log` |
+| 화면 비교 | `target/self-check-render.json` |
+
+## 2026-11-15 UI/진단 리팩토링 (1.0.3 적용 완료)
+
+- Windows 메인 팝업 그리기를 `src/ui/hud.rs`의 영역별 함수와 `src/ui/hud/drawing.rs`의 공통 그리기로 분리했다. 키45개는 동일한 배치표와 공통 반복문으로 그린다. Win 안내창의 그리기는 `src/win_shortcuts/renderer.rs`, 전환/IME 진단은 `src/diagnostics/transitions.rs`로 분리했다. 주기 진단은 상태 수집과 스케줄/저장을 함수로 나눴다. 공통 테스트 캡처는 `src/ui/test_capture.rs`.
+- 변경 전후 일반 테스트55개 통과. 별도 Windows 검사3개 통과(HUD, Win 안내창, IME 조회). HUD808×452 픽셀 차이0, Win 안내창870×300은 현재 시계 영역을 제외하고 차이0. 키45개 좌표/크기/순서/설명/분류도 동일. 결과 `target/refactor-render-comparison.json`.
+- 릴리스 및1.0.3 설치 파일 빌드 성공. 사용자 UAC 승인 후 정식 위치 설치/재시작 성공. `target/refactor-install.json` 성공과 빌드 `dde145cfd886ec2f`, 메인 PID50976/Guardian PID44296 실행 및 independent=true/ready=true 확인. 설정/바탕화면 바로가기 원격 인수 유지.
+- 구조 변경과 항목별 이유/검증 범위는 `REFACTORING.md`. 기존 입력/IME 증상의 원인을 해결한 변경이 아니다. Git 커밋/업로드는 수행하지 않았다.
+
+## 2026-11-15 메인 HUD 안내 표시 정리 (1.0.3 적용 완료)
+
+- 사용자 요청으로 숫자1–9의 `+Win` 설명/강조를 제거했다. 오른쪽 중복 Win 키를 그리지 않고 왼쪽 Win 키만 `+ 1~9`로 표시한다. 하단 추가 설명은 기존 회색 `0x888888`로 통일했다. 창 크기/나머지 배치/기능은 유지한다.
+- 릴리스/설치 파일 빌드 및 기존 정식 위치 설치/재시작 성공. 빌드 `ca7a1972eab2c518`, 메인 PID57808/Guardian PID57700 실행 및 independent=true/ready=true 확인. 설정/바로가기 원격 인수 유지. 결과 `target/hud-label-refinement-install.json`, 로그 `target/hud-label-refinement-package.log`. 이번 변경의 실제 화면 캡처는 수행하지 않았다.
+
+## 2026-11-15 메인 HUD에 팝업/Win 단축키 안내 추가 (1.0.3 적용 완료)
+
+- 기존808×452 배치와 버튼/키 좌표를 유지한다. 숫자1–9에 `+Win` 설명과 민트 강조, 양쪽 Win 키에1초 안내 설명을 추가했다. 기존 하단 Caps 설명에0.5초 팝업 재열기를 반영하고, 남아 있던 하단425–443 영역에 Win1초 안내/Win+1–9 작업 표시줄 실행·전환 설명을 한/영으로 추가했다.
+- 표시 설명만 변경했다. 릴리스/설치 파일 빌드 및 기존 정식 위치 설치/재시작 성공, 설정/바로가기 원격 인수 유지. 빌드 `7a037e3232f619d1`, 메인 PID54848/Guardian PID58256 실행 확인. 결과 `target/hud-shortcut-labels-install.json`, 로그 `target/hud-shortcut-labels-package.log`.
+- 실제 창 캡처 시도는 Computer Use의 `ShellExecuteW returned 5` 및 창 재선택 후 `window id 50334042 was not found`로 실패했다. 최소화된 창에 대한 화면 겹침/잘림은 확인 완료로 보고하지 않는다. 첫 글자 영문 현상은 여전히 조사 중이며 해당 기능 수정으로 보고하지 않는다.
+
+## 2026-11-15 모드 OFF 직후 첫 글자 영문 현상 진단 (1.0.3 적용 완료)
+
+- 사용자는 Codex/카카오톡에서 간헐적으로 발생하고 메모장 비교에서는 재현하지 못했다고 보고했다. 특정 앱만의 문제로 단정할 수 없다. 코드상 native CapsLock Toggle 경로는 한·영 전환을 직접 실행하지 않으며, 모드 OFF는 즉시 타자 통과 후25ms 지연 Caps 상태 동기화가 있다. 기존 로그만으로 첫 글자 영문 원인은 확정하지 못했다.
+- `--diagnose-input`에 제한된 전환 진단을 추가했다. Caps 전환 및 OFF 뒤2초 이내 첫 문자 범주3회에 대해 통과/차단, 보조키, 출처, IMM 호환 IME 상태를 기록한다. 실제 문자/키 코드/조합 문자열은 기록하지 않는다. 최대30분/2000건, 별도 스레드의10ms 제한 조회, 훅에서는 대기하지 않는다. IMM 값은 앱의 TSF 상태와 다를 수 있으므로 단독 확정 근거로 쓰지 않는다.
+- 일반 테스트55개 및 실제 Windows IME 읽기 검증1개 통과. 빌드/정식 설치/재시작 성공, 설정/바로가기 인수 유지. 빌드 `3ec6f7025ca889ff`, 메인 PID57776/Guardian PID44408 실행 확인. 결과 `target/ime-transition-install.json`, 로그 `target/ime-transition-tests.log`, `target/ime-transition-native.log`, `target/ime-transition-package.log`.
+- 재현 로그는 `~/.keysor/input-transition-57776.jsonl`이다. 원인을 해결한 빌드가 아니라 재발 시점 확인용이다. 버전1.0.3, Caps 팝업500ms/Win 안내1초 유지.
+- 적용 직후 실제 기록에서 카카오톡 OFF(2874ms)→ON(2949ms), OFF(5764ms)→ON(5884ms), Chrome OFF(15374ms)→ON(15454ms)를 확인했다. Chrome의 후속 문자 범주 입력3회는 mode=true/passed=false였다. 이 구간에 Ctrl/Alt/Win/Shift는 모두 false였다. 카카오톡 IMM 상태는 native=true/open=true를 유지했다. 모드 재활성화 및 차단은 관찰됐으나, 사용자가 보는 첫 영문 출력과 동일 시점인지는 확인되지 않았다.
+- 지연 동기화가 사용하는 GetKeyState는 호출 스레드의 키 메시지 처리에 따라 값이 갱신되는 API다. 이 코드의 메인 스레드 조회가 오래된 상태를 돌려줄 가능성을 다음 조사 대상으로 삼는다. 이 사실만으로 IME 전환이나 첫 영문 출력의 원인을 확정하지 않는다.
+
+## 2026-11-15 CapsLock 팝업 대기0.5초 (1.0.3 적용 완료)
+
+- 사용자 요청으로 CapsLock 길게 누르기 기준을2초→500ms로 변경했다. 499ms 전 미발동/500ms 발동, 반복 입력 및 취소 검사를 갱신했다. 기존 CapsLock 모드 동작과 Win 안내1초는 유지한다. 대화형 HUD 검사의 사전 대기 구간도350ms로 맞췄다.
+- 일반 테스트54개 통과(대화형3개 제외), 설치 파일 빌드 및 정식 위치 설치/재시작 성공. 실제 물리/원격 키 입력으로500ms 팝업 동작은 이번에 별도 검증하지 않았다.
+- 빌드 `08bd5a28d701b8e7`, 메인 PID51724/Guardian PID54060 실행 확인. 설정과 바로가기 인수 유지. 결과 `target/caps-half-second-install.json`, 로그 `target/caps-half-second-tests.log`, `target/caps-half-second-package.log`.
+
+## 2026-11-15 작업 표시줄 높이/상태 영역 간격 (1.0.3 적용 완료)
+
+- 바 높이를83→62 논리 픽셀로 줄이고 숫자 타일 높이/실행 표시선을 맞췄다. 앱 배치 간격을46→44로 줄여 상태 영역을 확보하고, 화살표·와이파이·시간/날짜 사이 여백을 넓혔다. 표시 조건과 시간 갱신 동작은 유지한다.
+- Windows 대화형 안내창 테스트1개 통과, 캡처 `target/win-shortcuts-spacing-preview.png` 확인, 1.0.3 설치 파일 빌드 완료. 로그 `target/win-shortcuts-spacing-native.log`, `target/win-shortcuts-spacing-package.log`.
+- 사용자 UAC 승인 후 기존 정식 위치 설치/재시작 성공. `target/win-shortcuts-spacing-install.json` 성공 및 설정/바로가기 원격 인수 유지 확인. 빌드 `72e68be501fc6782`, 메인 PID48800/Guardian PID49000 실행 및 independent=true/ready=true 확인. 사용자 노트북 원격 화면은 별도 미검증이다.
+
+## 2026-11-15 작업 표시줄 숫자 및 현재 시간/날짜 (1.0.3 적용 완료)
+
+- 앱 그림을 숫자1–9로 바꾸고 전체 폭의 납작한 작업 표시줄에 시작/검색, 구분선, 실행 표시선을 유지했다. 가장 오른쪽에는 Windows PC의 실제 현지 시간(HH:mm)/날짜(YYYY.MM.DD)를 두 줄로 표시한다. 창이 보일 때만 시계를1초마다 갱신하며 숨길 때 타이머를 해제한다. 키 상태 폴링은 추가하지 않았다.
+- Windows 대화형 안내창 테스트1개 통과, 캡처 `target/win-shortcuts-numbered-preview.png` 확인. 설치 파일 빌드 및 기존 정식 위치 적용/재시작 성공. 빌드 `3ab3fdc5beda2b52`, 메인 PID52556/Guardian PID54112 실행 확인. 설정/바탕화면 바로가기 원격 인수 유지.
+- 결과 `target/win-shortcuts-numbered-install.json`, 로그 `target/win-shortcuts-numbered-native.log`, `target/win-shortcuts-numbered-package.log`. 사용자 노트북 원격 화면은 별도 미검증이다.
+
+## 2026-11-15 Win 안내의 작업 표시줄 디자인 보완 (1.0.3 적용 완료)
+
+- 작업 표시줄을 인식하기 어렵다는 사용자 의견을 반영해 전체 폭의 바에 시작/검색 영역, 서로 다른 앱 그림9개와 실행 표시선, 오른쪽 상태/시계 영역을 배치했다. 숫자와 화살표는 앱 영역에만 대응하며 문구는 넣지 않았다. 그림은 설명용이며 실제 앱/상태 목록이 아니다.
+- 변경은 그리기에 한정한다. Windows 대화형 안내창 테스트1개 통과 및 캡처 `target/win-shortcuts-taskbar-preview.png` 확인. 빌드/설치/재시작 성공, 설정과 바로가기 원격 인수 유지. 빌드 `bdfa9f8e4a5b913f`, 메인 PID49500/Guardian PID38964, independent=true/ready=true.
+- 결과 `target/win-shortcuts-taskbar-install.json`, 로그 `target/win-shortcuts-taskbar-native.log`, `target/win-shortcuts-taskbar-package.log`. 실제 사용자 원격 화면의 표시 여부는 별도 미검증이다.
+
+## 2026-11-15 Win 안내를 언어 없는 아이콘으로 변경 (1.0.3 적용 완료)
+
+- 제목/설명/Win 글자를 제거하고 Windows 로고+숫자 키1–9→작업 표시줄 앱 위치 도식으로 변경했다. 앱 그림은 순서 설명용이며 실제 앱 목록이 아니다. 높이를304→240 논리 픽셀로 줄였다. 표시 조건/입력 통과/반투명 스타일은 유지한다.
+- 일반 테스트54개 및 Windows 대화형 안내창 테스트1개 통과, 실제 창 캡처 `target/win-shortcuts-icons-preview.png` 확인. 1.0.3 설치 파일 빌드 완료. 로그 `target/win-shortcuts-icons-tests.log`, `target/win-shortcuts-icons-native.log`, `target/win-shortcuts-icons-package.log`.
+- 사용자 UAC 승인 후 기존 정식 위치 설치/재시작 성공. 설치 성공 보고서 `target/win-shortcuts-icons-install.json` 확인. 빌드 `88bc60477d8290eb`, 메인 PID48620/Guardian PID46388 실행 및 independent=true/ready=true 확인. 설정과 바탕화면 바로가기의 원격 인수 유지. 사용자 노트북 원격에서 실제 표시 여부는 별도 미검증이다.
+
+## 2026-11-15 Win 키 길게 누르기 안내 (1.0.3 적용 완료)
+
+- Win 키만1초 누르면 현재 작업 중인 모니터 중앙에 `Win + 1–9` 작업 표시줄 앱 실행/전환 안내를 표시한다. 왼쪽/오른쪽 Win 모두 지원하며 CapsLock 모드와 독립적으로 동작한다. 키서 HUD와 같은 다크/민트/반투명 스타일, 언어 설정, DPI 및 작은 모니터 맞춤을 적용한다.
+- Win 해제나 다른 키 입력 시 숨기며 짧은 입력/자동 반복/기존 조합키에는 새 안내를 표시하지 않는다. 창은 포커스/클릭을 가져가지 않고 Windows 키를 차단/합성하지 않는다. 기존 UI 스레드의1초 타이머와 마감 시점 물리 상태1회 확인을 사용한다. 해제 유실 대비 표시8초 제한. 최소화된 메인 창과 독립적인 도구 창이다.
+- 일반 테스트54개 통과(대화형3개 제외), 새 Windows 대화형 테스트1개 통과: 실제 생성/표시/중앙 배치/비활성·클릭 통과 속성/해제 및 안전 타이머 닫힘 확인. 실제 창 캡처를 확인했다. 이번 테스트는 입력 훅 설치나 클립보드 변경을 하지 않는다. 사용자 노트북 원격의 실제 Win 키 전달은 별도 미검증이다.
+- 설치 파일 빌드, 기존 정식 설치 위치 덮어쓰기/재시작 완료. 빌드 `c1e9ce5d0be619e5`, 메인 PID36548/Guardian PID13888, independent=true/ready=true. 설정/바탕화면 바로가기 및 원격 인수 유지. 결과 `target/win-shortcuts-install.json`, 로그 `target/win-shortcuts-tests.log`, `target/win-shortcuts-native.log`, `target/win-shortcuts-package.log`, 캡처 `target/win-shortcuts-preview.png`.
+
+## 2026-11-15 라이선스 상품 검증 (1.0.3 유지)
+
+- 사용자가 제공한 Lemon Squeezy 상품 ID `1180943`을 사용한다. 신규 활성화 전에 부작용 없는 validate 요청으로 상품을 확인하고, 활성화 응답에서도 다시 확인한다. 다른 상품 키는 기기 활성화 요청 전에 거부한다. 상품 메타데이터 누락/형식 오류도 신규 인증을 허용하지 않는다.
+- 기존 캐시는 온라인 재검증으로 상품 정보를 추가한다. 네트워크 장애 때 기존 캐시의 원래 28일 오프라인 유예를 유지하며, 다른 상품임이 확인되면 폐기한다. 동일 키의 기존 기기 등록은 재사용한다.
+- 일반 테스트49개 통과(대화형2개 제외), 설치 파일 빌드 및 정식 설치/재시작 성공. 빌드 `ca2b17aa20abe6e7`, 메인 PID48336/Guardian PID48832, independent=true/ready=true. 설정과 바로가기 인수 유지. 결과 `target/license-product-install.json`, 로그 `target/license-product-tests.log`, `target/license-product-package.log`.
+- API 응답은 모의 데이터로 검증했다. 실제 유료 라이선스의 신규 기기 등록은 수행하지 않았다. 버전은1.0.3이다.
+
+## 2026-11-15 입력 상태 복구 및 커서 갱신 최적화 (1.0.3 유지)
+
+- OS가 Ctrl/Alt/Win 전부 해제됐음을 확인했을 때 불리언뿐 아니라 pressed_modifier_keys의 일반/좌우 키 코드도 함께 정리한다. Shift는 유지한다. 물리 상태 확인과 상태 수정 사이에 새로운 키다운을 지우지 않도록 동일한 AppState 잠금 범위에서 처리한다. 기존 확인 조건/호출 주기는 유지하며 추가 키 상태 폴링은 도입하지 않았다.
+- 커서 스타일 요청을 매 프레임 전송하던 경로를 모드/전경 창/실제 적용 상태 변경 시 즉시, 안정 상태에는1초 간격으로 제한한다. UI 스레드의 처리 시점 재검증은 유지한다. 전경 앱 상세 정보는 UI/이동 경로가 공유하는1초 캐시를 사용하고 전경 창 변경 시 즉시 갱신한다. 재시도는 메시지 전송 성공 시에만 예약 상태를 확정한다.
+- 일반 테스트44개 통과: 잃어버린 보조키 해제 후 반대편 키를 눌렀다 놓아도 오래된 키가 되살아나지 않는 회귀 검사, 100Hz 요청1000회에서 안정 상태 스타일 요청10회 제한 및 상태 변경 즉시 처리 검사 포함. 대화형 Windows 통합 테스트2개 통과: 실제100회 요청에서 스타일 메시지3회 이하/공유 캐시 상세조회2회 이하, 기존 커서 적용/복구/단일표시/2초HUD/지원창·복사 검사 포함. 실제 CPU 절감량은 측정하지 않았다.
+- 정식 설치/재시작 성공. 메인 PID25412, Guardian PID50840, 빌드 `f5fb4e58a6229341`, 표시1.0.3. 기존 설정과 바로가기 인수 유지, Guardian independent=true/ready=true 확인. 결과 `target/input-perf-install.json`, `target/input-perf-result.json`; 로그 `target/input-perf-tests.log`, `target/input-perf-native.log`.
+- 라이선스 상품 확인은 Keysor 숫자 product_id 또는 variant_id 정보가 없어 인증 코드를 변경하지 않았다. 사용자에게 위치를 안내했으며, Lemon Squeezy Store→Products→상품 ⋯→Copy ID에서 복사되는 Variant ID로도 검증 가능함을 공식 문서로 확인했다. API 키/실제 라이선스 키를 요청하거나 유료 기기 활성화를 호출하지 않았다. 노트북 실제 원격 화면의 최신 화질은 미검증이다. 인터넷 배포 및 Git 커밋은 수행하지 않았다.
+
+## 2026-11-14 사용자 캡처 기반 커서 가장자리/끝부분 보완 (적용 완료)
+
+- 사용자 캡처 `스크린샷 2026-11-14 213020.png`에서 오른쪽 끝의 평평한 잘림과 번짐을 관찰했다. 기존 선 끝점 x30+반경2가32픽셀 캔버스 경계에 닿는 코드를 확인했다. 원격 전용 그림과 핫스폿을 함께(-2,-1) 이동하여 클릭 위치를 유지하며 투명 여백을 확보했다.
+- 4배 벡터 렌더링 후 premultiplied BGRA/alpha 면적 평균으로32×32를 합성하도록 바꿨다. 일반 테스트42개 및 설치 파일 빌드 성공. 실제 커서의 네 변 투명 여부/핫스폿14,15/32×32 크기/안티앨리어싱도 대화형 테스트에 추가했다.
+- 사용자 UAC 승인 후 실제 Windows 통합 테스트2개 통과. 최종 커서32×32, 네 변 투명 여백, 핫스폿14,15, 부분 투명 가장자리 및 기본 커서 복구 검사를 통과했다. 일반 테스트42개도 통과했다. 로그 `target/cursor-edge-native.log`, 설치 `target/cursor-edge-install.json`.
+- 정식 경로에 적용 및 재시작 완료. 메인 PID35484, Guardian PID41952, 빌드 `a52432985f6b097a`, 표시1.0.3. 기존 설정/바로가기 인수 유지 및 Guardian independent=true/ready=true 확인. 노트북 화면의 최종 시각적 화질은 아직 직접 확인하지 않았다. 클라이언트 확대·전송에 의한 번짐까지 해결됐다고 보장하지 않는다.
+
+## 2026-11-14 커서 복구/재적용 충돌 및 투명 마스크 보완 (적용 완료)
+
+- 진단 기록에서 일반 앱/모드 ON/native_fallback=false 상태에 native_keysor_applied가 false→100ms 후 true로 바뀐 것을 확인했다. 커서 스타일/복구 메시지를 처리하는 UI 스레드에서 현재 AppState와 전경 창을 다시 판별하도록 변경했다. 일반 화면에서 모드 ON이면 지연된 복구 요청을 무시하고 Keysor 모양을 유지한다. 단축키만 눌렸다는 이유로 기본 커서 모양을 복구하지 않고, 실제 시스템 창 또는 OFF에서 복구한다.
+- 알파와 맞지 않던 전부 0인 AND 마스크를 실제 투명 픽셀 기준으로 생성한다. 부분 투명 가장자리는 유지한다. 이는 마스크를 사용하는 캡처 경로 호환성 보완이며 사용자 노트북의 픽셀 깨짐 원인이 이 경로라고 확정하지는 않았다.
+- 일반 테스트 42개 통과, 릴리스 및 설치 프로그램 빌드 성공. 사용자 UAC 승인 후 실제 Windows 통합 테스트 2개도 통과했다. 일반 화면에서 복구 요청20회에도 적용 상태가 유지되고 기본 커서 테마 복구 횟수가 증가하지 않는 것을 검사했다. 결과 `target/cursor-stability-native.log`, `target/cursor-stability-result.json`, `target/cursor-stability-install.json`.
+- 정식 설치 및 재시작 완료. 메인 PID10324, Guardian PID33324, 빌드 `f73629dad7d83b73`, 표시1.0.3. 경로/기존 설정 유지 및 Guardian 준비 상태 확인. 새 진단 기록의 일반 앱/모드 ON 상태에서 native_keysor_applied=true, overlay_visible=false, native_cursor_restore_count=2가 유지됐다. 사용자 노트북의 최종 화질 및 모든 이동 구간의 전환 현상은 직접 확인하지 않았다.
+
+## 2026-11-14 원격용 커서 직접 렌더링 화질 개선 (적용 완료)
+
+- 원격용 커서의 CopyImage 40→32 축소를 제거했다. 공통 `draw_cursor_artwork`로 오버레이와 동일한 선/그라데이션/안티앨리어싱을 사용해 32×32 비트맵에 직접 렌더링한다. 원격 커서는 별도 master를 보관하고 CopyIcon으로 크기 변경 없이 적용한다. 오버레이 DPI/애니메이션은 유지한다.
+- 일반 테스트 41개 통과(대화형 2개 기본 제외), 릴리스/설치 프로그램 빌드 성공. 실제 적용된 커서의 32×32 크기와 반투명 가장자리 픽셀도 검사하도록 대화형 테스트를 보완했다.
+- 사용자 UAC 승인 후 실제 Windows 통합 테스트 2개 통과. 실제 적용된 커서의 32×32 크기와 반투명 알파 가장자리 유지, 기본 테마 복구를 검사했다. `target/cursor-quality-result.json`은 Success=true, NativeTestsPassed=true다. 실제 그림 영역은 18×20, 핫스폿16,16으로 측정했다.
+- 정식 설치 및 재시작 완료: 메인 PID35480, Guardian PID9324, 빌드 `cc4e7d0504ac4d69`, 표시1.0.3. 실행 경로 및 설정 보존 확인, Guardian independent=true/ready=true. 결과 `target/cursor-quality-install.json`, 로그 `target/cursor-quality-native.log`. 노트북 원격 클라이언트에 최종 표시되는 화질은 직접 확인하지 않았다.
+
+## 2026-11-14 원격 화면 맞춤 커서 크기 보정 (1.0.3 유지)
+
+- 사용자: 노트북 원격 화면이 화면 맞춤/축소 표시임을 확인. 이전 a56bbdb/96ddd1e의 기준 캔버스 32 논리 픽셀 및 선 좌표/굵기를 대조했다. 수정 전 실제 Windows 커서 비트맵 측정은 Canvas=40×40, Visible=22×25, Hotspot=20,20으로 호스트 125%의 기존 렌더링과 같았다. 크기 증가를 호스트 비트맵 자체 탓으로 단정한 설명은 잘못이었으며 원격 영상과 별도 포인터의 배율 차이를 고려했다.
+- Chrome 원격 모드에서만 네이티브 커서 복제를 CopyImage(... IMAGE_CURSOR,32,32,0)로 보정했다. 기존 기본 32 논리 픽셀 기준이며, 호스트 DPI 확대 이미지를 그대로 클라이언트 포인터로 쓰지 않도록 했다. 휴대폰/억제 상태 오버레이와 비원격 모드 그림은 유지한다. 실제 클라이언트의 영상 축소율 자동 감지는 아니므로 모든 화면 배율에서의 정확한 시각적 일치는 미검증이다.
+- 일반 테스트 41개 및 실제 Windows 통합 테스트 2개 통과. 통합 검사에서 실제 적용된 Windows 표준 커서가 32×32인지 확인하고 기본 테마 복구도 검사했다. 적용 후 실제 비트맵 측정: Canvas=32×32, Visible=18×20, Hotspot=16,16 (`target/native-cursor-size-after.txt`).
+- 정식 설치/바로가기 적용 및 재시작 성공. 메인 PID 40108, Guardian PID 41800, 빌드 e4cc2a6206fd063c, 표시 버전 1.0.3. 결과 `target/cursor-size-install.json`, `target/cursor-size-result.json`. 실제 노트북 원격 화면에서의 체감 크기는 사용자 확인이 필요하다.
+
+## 2026-11-14 일반 화면 단일 Keysor 모양으로 최종 변경 (1.0.3 유지)
+
+- 사용자 요구: 시스템 팝업 전에는 Keysor 커서만 표시. 원격 모드에서 무조건 오버레이를 표시하던 정책은 폐기했다. 기본 커서 자체에 가시적인 Keysor 그림을 적용하고, 기본 커서 표시 시 오버레이를 숨기며 억제 시에만 오버레이를 표시한다.
+- `src/cursor_scheme.rs`는 실제 오버레이의 불투명 색상 비트맵으로 네이티브 커서를 만들고 표준 커서 14종에 복제 적용한다. 투명 커서를 사용하지 않으며 레지스트리 테마를 영구 변경하지 않는다. 현재 PID의 독립 Guardian 준비 보고서가 확인된 경우에만 적용한다. 실패 시 기본 테마를 복구한다. UI 스레드에서 적용/복구하며 모드 OFF, 시스템 예외, 종료 및 Guardian 비정상 종료 복구를 유지한다.
+- 일반 테스트 41개 및 대화형 Windows 통합 테스트 2개 통과. 독립 Guardian을 둔 실제 네이티브 커서 적용/복구를 추가 검사했고, 테스트 중에는 기존 앱을 종료했다가 성공 후 수정본으로 재시작했다. 로그: `target/keysor-native-cursor-native.log`, `target/keysor-native-cursor-tests.log`. 설치 결과: `target/keysor-native-cursor-install.json`, 전체 결과 `target/keysor-native-cursor-result.json`.
+- 새 메인 PID 34724, Guardian PID 15464, 빌드 ID `46e0e87552e931d2`, 표시 버전 1.0.3. 기존 정식 경로/바로가기/설정 유지. 진단 로그에서 `native_keysor_artwork_ready=true`, `native_keysor_applied=true` 확인. 당시 Windows 기본 커서 억제 상태에서는 오버레이만 표시됐다. 노트북·휴대폰의 실제 화면 비교 및 앱/원격 클라이언트가 자체 렌더링하는 포인터는 미검증이다. 인터넷 배포는 수행하지 않았다.
+
+## 2026-11-14 Chrome 원격 노트북에서도 Keysor 오버레이 우선 표시 (1.0.3 유지)
+
+- 사용자 보고: 휴대폰 원격에서는 Keysor 커서가 보이고 노트북 원격에서는 기본 커서가 보였다. 호스트 CURSORINFO만으로 원격 클라이언트 화면을 판단하던 정책을 Chrome 원격 호환 모드에서 변경했다.
+- `--chrome-remote` 모드의 일반 화면에서는 기본 커서 표시/억제/조회 실패와 관계없이 Keysor 오버레이를 표시한다. 시스템 창/단축키 일시정지 및 모드 OFF에서는 기존 기본 커서 대체 처리를 유지한다. 원격 호환 모드가 아니면 기존 중복 방지 정책을 유지한다. 커서 위치 갱신 직전의 표시 검사에도 같은 옵션을 적용했다.
+- 일반 테스트 41개, 실제 Windows 통합 테스트 2개 통과. 통합 테스트에서 일반/원격 모드 각각의 표시·숨김 경로와 기존 2초 HUD 및 지원 창/복사 동작을 검사했다. 릴리스/설치 파일 빌드 성공. 표시 버전은 사용자 정책대로 1.0.3 유지.
+- 정식 설치 적용 결과: `target/remote-overlay-install.json`. 노트북/휴대폰 실제 화면 간 비교는 미검증이다. 이 수정은 호스트 화면의 Keysor 오버레이를 표시하며 원격 클라이언트 자체의 화살표를 숨기지는 않는다. 따라서 클라이언트 자체 커서까지 포함한 중복 제거를 보장하지 않는다.
+
+## 2026-11-14 사용자 버전 정책 교정: 표시 1.0.3 유지
+
+- 사용자가 명시적으로 버전을 올리라고 요청할 때까지 버전을 올리지 않는다. 중복 커서 방지 등 기능 수정은 유지하고 Cargo/설치 프로그램 표시를 1.0.3으로 되돌렸다. 동일 버전의 수정은 빌드 ID와 SHA256으로 구분한다.
+- 1.0.3 릴리스/설치 파일 재빌드 성공. 정식 설치 적용 결과: `target/version-103-install.json`. 이전 1.0.4 설치 파일은 `target/version-rollback-archive/`에 보관한다. 아래 1.0.4 기록은 당시 작업 이력이며 현재 표시 버전 정책을 뜻하지 않는다.
+
+## 2026-11-14 Windows 1.0.4 중복 커서 표시 방지
+
+- 일반 화면에서 실제 Windows 기본 커서가 보일 때 Keysor 오버레이를 숨긴다. 기본 커서가 숨겨지거나 억제된 경우에만 오버레이를 표시하며, 커서 상태 조회 실패 시에도 오버레이를 켜지 않는다. 원격 접속/시스템 UI에서 커서가 사라졌던 과거 문제가 있어 기본 커서를 투명하게 덮어쓰거나 다른 앱의 커서를 강제로 숨기는 방식은 사용하지 않았다. 일반 화면에서 기본 커서 하나가 보일 수 있으며 입력 기능은 유지한다.
+- 기본 커서 복구가 필요할 때는 오버레이를 먼저 숨긴다. 정상 오버레이 모드에서는 불필요한 기본 커서 복구를 반복 요청하지 않는다. SWP_SHOWWINDOW 경로 직전에도 기본 커서 표시 상태를 재확인한다. 알려진 시스템 창/단축키의 기본 커서 대체 경로는 유지한다.
+- 일반 테스트 41개 통과, 대화형 통합 테스트 2개 통과. 통합 검사에 실제 커서 조회에 따른 오버레이 창 표시/숨김 및 대체 상태/OFF 전환을 추가했다. 로그: `target/single-cursor-tests.log`, `target/single-cursor-native-tests.log`. 외부 원격 접속 클라이언트가 자체적으로 그리는 포인터 및 실제 사용자 화면의 모든 전환 프레임은 검증하지 않았다.
+- 릴리스·설치 파일 빌드 및 정식 설치 업데이트 성공. 결과: `target/single-cursor-install.json`, 백업 `target/standard-install-backup-20261114-164714/`. 바탕화면 바로가기 및 기존 `--chrome-remote --diagnose-input` 인수·설정 유지. 새 메인 PID 17764, Guardian PID 38888가 정식 경로에서 실행되며 Guardian `independent=true`, `ready=true` 확인. 인터넷 배포는 수행하지 않았다.
+
+## 2026-11-14 Windows 1.0.3 CapsLock 2초 HUD 및 검증
+
+- `src/caps_hold.rs`에서 CapsLock 눌림/해제를 기존 모드 처리와 별도로 추적한다. 최초 키다운에만 일회성 2초 타이머를 시작하고, 키업/다음 누름의 세대 번호로 이전 타이머를 취소한다. 반복 키다운은 타이머를 재시작하지 않는다. UI 스레드에 명시적 HUD 열기 메시지를 보내며, CapsLock이나 마우스 모드를 추가로 변경하지 않는다. 별도 키 상태 폴링은 없다. CRD lock-sync 및 Keysor 자체 주입 입력은 기존 필터에서 제외된다.
+- 일반 Windows 테스트 40개 통과(대화형 테스트 2개는 기본 실행에서 제외). 실제 대화형 Windows에서 두 테스트를 따로 실행하여 모두 통과했다: 모드 ON/OFF에서 2초 전 숨김/2초 후 실제 HUD 표시 및 상태 불변, 지원 창 컨트롤 경계/실제 BUTTON 이벤트/클립보드 UTF-16 내용 일치. 로그: `target/native-ui-tests.log`. 이 테스트들은 테스트용 이벤트를 직접 전달하며 물리 키보드·CRD 장치 입력 자체를 검증하지 않는다.
+- 컴퓨터 사용 도구에서 지원 창의 실제 화면을 확인했다. 관리자 권한 차이로 도구의 직접 마우스 클릭은 동작을 확인하지 못해 네이티브 버튼 통합 테스트로 검증했다. 정식 코드의 HUD 정보 링크→지원 창 표시도 네이티브 통합 테스트에 추가하여 검증했다. 이 검사에서 숨김 시작 힌트가 지원 창을 숨기던 문제를 발견했고, 명시적 `SetWindowPos(SWP_SHOWWINDOW)` 표시로 수정 후 두 통합 테스트가 다시 통과했다. 물리 마우스로 직접 누른 검증은 아니다. 개발용 `--preview-support`는 debug 빌드에만 있고 입력 훅/Guardian을 시작하지 않는다.
+- 릴리스·설치 프로그램 빌드 성공. `scripts/test-windows-install-lifecycle.ps1`로 실제 정식 설치 업데이트→제거→재설치 성공, 실행 파일/바로가기 제거 및 설정 유지 확인. 결과: `target/lifecycle-test-result.json`, 상세 로그: `target/lifecycle-test-20261114-151223/`. 사용자에게 별도 검증 PC/VM이 없음을 확인했으므로 다른 PC 검증은 미완료다.
+- 제거 프로그램은 정상 종료 요청 후 제거하고 해당 설치 경로의 자동 시작 항목을 정리한다. 최종 재설치 후 메인 PID 36128, Guardian PID 31992가 `C:\Program Files\Keysor\standard`에서 실행됐으며 Guardian `independent=true`, `ready=true`. 기존 바탕화면 인수 `--chrome-remote --diagnose-input` 유지. 메인 SHA256 `A6F4B24DBABF11177314131533820E39BABF4F359DE5D38392FF3F56EB8BC637`. 공개 인터넷 배포는 수행하지 않았다.
+
+- 최종 표시 수정까지 포함한 설치 결과: `target/caps-hold-final-install.json`. 메인 PID 39744, Guardian PID 27428가 정식 경로에서 실행 중인 것을 확인했고 Guardian 준비 상태도 확인했다. 최종 메인 SHA256 `287AF6309221EB599C725FBEE98E8ABEA5655295B9A65D43C483D3E20C9BD1BC`, 백업 `target/standard-install-backup-20261114-151804/`. 앞의 PID/해시는 최종 표시 수정 전 수명주기 검증 시점 기록이다.
+
+## 2026-11-14 Windows 1.0.2 정식 설치 경로 및 지원 정보
+
+- 정식 경로는 `C:\Program Files\Keysor\standard`로 유지하고, 설치 프로그램에서 과거 사용자 지정 경로 재사용을 끈다. 실행 중인 Keysor는 WM_CLOSE로 종료를 요청하고 같은 경로에 업데이트한다. 바탕화면 바로가기 생성은 기본 선택이며, 기존 원격 접속/진단 옵션과 활성화된 사용자 자동 시작 경로를 유지한다.
+- HUD 하단 오른쪽 `v1.0.2 · 정보 / 지원(Info / Support)`에 지원 창을 추가했다. 버전·소스 빌드 ID·실행 경로·Guardian 상태를 표시하고, 진단 정보 복사 및 수동 업데이트 확인 버튼을 제공한다. 사용자 프로필 경로는 가리고, 라이선스 키·입력 내용·창 제목·방문 URL은 읽지 않는다. 자동 업로드는 없다. `--support-report <파일>`은 훅과 Guardian을 시작하기 전에 진단 보고서만 저장하고 종료한다.
+- 빌드 ID는 소스 입력으로 산출한다. Windows 테스트 37개 통과, 메인/Guardian 릴리스 및 Inno 설치 파일 빌드 성공. 공개 GitHub 업데이트 API는 조회 당시 `v1.0.1`을 반환했다. 이번 1.0.2를 인터넷에 게시하지는 않았다.
+- `scripts/install-windows-local.ps1`로 기존 파일/바로가기를 백업하고 설치·설정 보존·해시·실행 경로를 검증했다. 초기 설치 전환과 최종 빌드 재설치 모두 성공했다. 최종 결과: `target/standard-upgrade-result.json`, 백업: `target/standard-install-backup-20261114-111743/`. 현재 기록된 메인 PID 7244, Guardian PID 32224는 모두 정식 경로에서 실행됐으며 Guardian `independent=true`, `ready=true`다. 바탕화면 인수 `--chrome-remote --diagnose-input` 유지.
+- 실제 설치/업데이트 경로와 훅 없는 보고서 생성까지 검증했다. 화면 자동화 도구가 관리자 권한 Keysor 창을 찾지 못해 HUD 진입·지원 창 레이아웃·클립보드 버튼의 실조작은 확인하지 못했다. 다른 PC 신규 설치/제거 및 다른 사용자 계정으로 UAC 인증하는 설치는 미검증이다. 설치 프로그램 자체의 자동 롤백은 구현하지 않았다. 운영 가이드: `WINDOWS_INSTALL_UPDATE.md`.
+
+## 2026-11-14 입력 리뷰 개선 및 기존 바로가기 빌드 교체
+
+- Windows 기본 CapsLock Toggle은 키다운에서도 비동기 OS 상태 동기화를 요청한다. 키업까지 기다리던 활성화 지연을 줄이고, 비활성화 시에도 재동기화한다. 반복 키다운 차단은 유지한다.
+- 좌우 Shift/Ctrl/Alt/Win의 눌림을 개별 키 집합으로 추적하여 한쪽을 놓아도 다른 쪽이 눌려 있으면 보조키 상태를 유지한다. macOS도 좌우 키코드를 구분하고 flagsChanged에서 해당 물리 키의 상태를 읽는다.
+- macOS 자동 반복 입력도 공통 입력 처리로 전달하여 마우스 이동 키의 반복 문자가 대상 앱으로 통과하지 않게 한다. macOS 빌드 및 실제 장치 동작은 검증하지 않았다.
+- `KEYSOR_TEST_BUILD=1 cargo test --bin keysor --offline`: 34개 통과. `cargo build --release --offline --bin keysor --bin keysor-guardian`: 성공. 기존 컴파일 경고는 남아 있다.
+- 기존 실행 경로를 확인한 뒤 메인만 종료하고 Guardian 종료를 기다려, `target/hud-popup-candidate/release/`의 메인과 Guardian을 교체했다. 기존 파일 백업: `target/review-fixes-backup-20261114-101956/`.
+- 바탕화면 `Keysor.lnk`의 기존 대상과 `--chrome-remote --diagnose-input` 인수를 유지했다. 재시작된 메인 PID 36544와 Guardian PID 36736의 경로를 확인했고, watchdog 시작 로그는 `independent=true`, `ready=true`를 기록했다. 메인 SHA256: `321F93F54D72C54E1FF1DE123C0852885AECA0BFB11578CB210DEDF46AB2448F`. 배포 결과: `target/review-fixes-deployment.json`.
+- 자동 테스트, 파일 해시, 실행 경로 및 Guardian 준비 상태를 확인했다. 실제 화면/키보드 조작 결과는 아직 확인하지 않았다.
+
+## 2026-11-04 Windows 시작 팝업 / 작업표시줄 복원
+
+- Windows에서 키서가 CapsLock ON 상태로 시작해도 최초 HUD 팝업을 표시한다. 시작 시 CapsLock 상태 동기화를 HUD 창 생성보다 먼저 수행하여 기존 마우스 모드와 팝업 표시가 서로 경합하지 않게 했다.
+- 작업표시줄에서 최소화된 키서 창을 복원하면 마우스 모드의 자동 숨김 상태와 관계없이 HUD를 다시 표시한다. CapsLock을 새로 켤 때 팝업을 최소화하는 기존 동작, 일반 창 활성화만으로 숨긴 팝업을 다시 열지 않는 동작, 라이선스 입력 중 HUD 숨김은 유지한다. Windows 작업표시줄 복원은 `WM_SIZE`의 복원 경로로 처리하므로, 다른 방식으로 창을 복원할 때도 같은 표시 정책이 적용될 수 있다.
+- `scripts/test-windows.ps1`에서 33개 테스트 통과(신규 HUD 정책 테스트 3개 포함). 별도 폴더 `target/hud-popup-candidate/release/`에서 Windows 릴리스 메인/Guardian 빌드 성공. `keysor.exe` SHA256 `6AABE69B683766C43B5FAA39A028E85FC101CDCC413453CBD80C49DE00D32203`, `keysor-guardian.exe` SHA256 `7FAE1EAC5715C1953DF9560AD4C71F5FA9990F8F746EF12B8BA0E67086C11987`.
+- 기존 바탕화면 `Keysor.lnk`를 `target/hud-popup-candidate/Keysor-shortcut-before-20261104-185034.lnk`로 백업하고 새 후보로 연결했다. 기존 인수 `--chrome-remote --diagnose-input`를 유지한 채 메인 PID 53204를 종료하고 새 메인 PID 56768과 Guardian PID 50800을 실행했다. `.keysor/input-diagnostic-56768.jsonl` 헤더에서 새 실행 경로를 확인했다. 전환 보고서: `target/hud-popup-candidate/shortcut-switch-report.json`.
+- 자동 테스트·실행 경로 확인은 완료했다. 실제 화면에서 시작 팝업과 작업표시줄 클릭 복원 반응은 아직 사용자가 확인해야 한다. 이번 작업에서 공개 `dist` 설치 파일은 교체하지 않았다.
+
+## 2026-11-04 Windows 커서 오버레이 / 전역 자석 탐색 최적화
+
+- **적용 범위:** Windows 전용 `src/ui/win_gdi.rs`, `src/ui/win_uia.rs`만 수정했다. 키 입력, CapsLock, macOS 코드는 변경하지 않았다.
+- **커서 오버레이:** 마우스 모드의 반복 갱신에서 위치와 크기가 그대로면 불필요한 `SetWindowPos`를 건너뛴다. 전경 창이 바뀌면 즉시 갱신하고, 가만히 있을 때도 250ms마다 최상단 상태를 재확인한다. 상태/배율 변화에 따른 `UpdateLayeredWindow`는 유지하고, 실제 그림을 그리지 않는 `WM_PAINT`에 대한 매 틱 `InvalidateRect`/`UpdateWindow` 호출은 제거했다.
+- **전역 자석 UIA:** 대상이 0개인 정상 탐색 결과도 캐시하여 같은 창을 300ms마다 재탐색하지 않는다. 커서가 80px 이상 움직여 같은 창을 재탐색할 때는 최소 900ms 간격을 적용한다. 창 전환과 `FORCE_UIA_REFRESH`는 즉시 처리하고, 창의 루트 UIA 요소를 가져오지 못한 경우에는 다음 주기에 다시 시도한다. 전역 자석 모드가 꺼져 있으면 기존처럼 탐색을 건너뛴다.
+- **자동 검증:** `scripts/test-windows.ps1`의 Windows 테스트 30개 통과. `cargo build --release --offline --bin keysor --bin keysor-guardian` 성공. 별도 빌드 폴더 `target/overlay-uia-opt-candidate/release/`의 `keysor.exe` SHA256은 `3B1AD390768D33DA832D4330D34593D50786529C0E9615F3606C3448DB716E20`, `keysor-guardian.exe` SHA256은 `5CD98416E3FB8F38E7D0938B414300341E63C8E670F437BE0B1ADE8F9DFEDB01`이다.
+- **실행/바로가기:** 기존 바탕화면 `Keysor.lnk`를 백업한 뒤 새 후보를 대상으로 변경했다. 인수 `--chrome-remote --diagnose-input`는 유지했다. 이전 메인 PID 35116을 종료하고 바로가기에서 새 메인 PID 12276, 독립 Guardian PID 28560을 시작했다. 재확인 시 두 프로세스가 실행 중이었고 `.keysor/input-diagnostic-12276.jsonl` 헤더도 새 실행 파일 경로를 기록했다. 바로가기 백업과 전환 결과는 각각 `target/overlay-uia-opt-candidate/Keysor-shortcut-before-20261104-054004.lnk`, `target/overlay-uia-opt-candidate/shortcut-switch-report.json`에 있다.
+- **검증 경계:** 테스트/빌드와 실행 경로 확인은 완료했지만, 사용자가 보는 커서 부드러움·최상단 표시·자석 반응과 실제 CPU 절감량은 아직 실조작/계측으로 확인하지 않았다. `dist` 설치 파일이나 공개 배포 파일은 이번 작업에서 교체하지 않았다. 아래 과거 섹션의 실행 PID·바로가기 상태는 작성 당시 기록이며 현재 상태가 아니다.
+
+## 2026-11-03 Windows CapsLock Mode Alignment Candidate
+
+- The default Windows `CapsLock` + `Toggle` path now lets one real keydown and its keyup reach Windows while Keysor mirrors the same on/off transition. Repeated keydown is blocked. This avoids the old hook-thread `GetKeyState`/`SendInput` decision for each physical press.
+- Chrome Remote Desktop's virtual lock-sync events (scan code 0) are blocked when this mode owns CapsLock, so they cannot toggle only the Windows lock state after a real press. Other modifier modes retain the previous handling.
+- Configuration reload preserves an active native CapsLock mode and held-key state when the CapsLock toggle setting is unchanged. Windows tests: 30 passed. Unsigned release build succeeded. Isolated pair: `target/capslock-sync-candidate/Keysor.exe` SHA256 `CBC5AA14116F1C631F4AD5889D6B8BB9747D770D069B9F538288095734709583`; Guardian SHA256 `2CC36BFAF56D8BA796D446666A0DC00A8B6173A07BBDB3F3D3E7BC446956A784`.
+- The previous `dist` executable remains running as PID 46104 with Guardian PID 52972; desktop shortcut and installed files are unchanged. A guarded attempt to stop only PID 46104 failed with Windows `Access is denied`, so the new candidate was not launched. Native Windows/Chrome Remote Desktop visual CapsLock-state agreement requires an interactive test after the user cleanly exits the elevated old process. External lock-state changes by other software are not covered by these unit tests.
+## 2026-11-03 Shift+Space Enter Output Queue
+
+- Shift+Space now queues the simulated Enter on the existing output worker rather than injecting it synchronously from the keyboard hook. Keydown still triggers once, keyup remains blocked without another Enter.
+- The actual handler path has a regression test; 27 Windows tests passed with `KEYSOR_TEST_BUILD=1`. Rebuilt the unsigned Windows setup and distinct main/guardian executables; `dist/SHA256SUMS.txt` was regenerated and verified by the package script.
+- The installed/running Keysor was not replaced. Live typing and shortcut timing, clean-PC installation, and Mac runtime behavior remain unverified. The Space tap/drag timer-thread design is still a separate pending improvement because it has more interaction and cancellation risk.
+## 2026-11-03 Input Hook Beep Isolation
+
+- Pro-only J/K tab and RunApp denial now queues a `Beep` action instead of calling the OS sound API while the keyboard hook holds AppState. This keeps blocking feedback off the hook callback and does not change shortcut eligibility or key blocking.
+- Added tests for keydown feedback and keyup no-action on both paths; 26 Windows tests passed using `KEYSOR_TEST_BUILD=1`. The unsigned standard Windows package rebuilt successfully, including the distinct guardian. `dist/SHA256SUMS.txt` matches the new installer and executable hashes.
+- The installed/running Keysor was not replaced or restarted. Audible feedback timing and GUI behavior on a real machine remain unverified; the Mac build/runtime was not tested in this Windows session.
+## 2026-11-03 Dedicated Guardian Binary
+
+- Keysor remains one user-facing application and shortcut. The installer contains a separate 191 KB `keysor-guardian.exe` helper that only waits for the main process and reloads the native cursor; it has no input hooks or UI. The main executable is about 3.18 MB. They are different compiled binaries, not renamed copies.
+- Windows package build succeeded. SHA256: `Keysor.exe` `1F083595A045660B467A90D96A4ACF9BDA129DC6C4B35F2E0DA99F5DE903DEF5`; `Keysor-Guardian.exe` `BCC1466CA4FFBB17BEB32BD1CD05A1D45C27C4A705CA1BE9FAA27BA2F964523F`; setup `246839BBD7CE0C790AA7063AB3D7405A686C8603492D13036091C38B54701C5`.
+- The 24 existing Windows tests passed in the no-manifest test build. An isolated release-guardian probe force-stopped only the disposable parent's image name and recorded `ready=true`, `wait_result=0`, `restore_ok=true` in `target/watchdog-test/dedicated-guardian-result.json`. The installed/running Keysor was not replaced or restarted. Actual Defender quarantine, killing the entire process tree, and a second-PC installation remain unverified; a distinct binary improves the image-name case but does not guarantee survival of every security action.
+## 2026-11-03 Windows Package Consistency
+
+- Updated `scripts/package-windows.ps1` and `scripts/keysor-setup.iss` so Inno Setup first builds into `target/release-package/windows-output`; only a complete staged package with matching main/guardian hashes is copied to `dist`.
+- Rebuilt the unsigned standard Windows release. `dist/Keysor.exe` and `dist/Keysor-Guardian.exe` both have SHA256 `1886AB4398F0A401FCBF92FFA9CD9800F9E300E36C7DA7E1CD3998F3C712C9DF`. `dist/Keysor-Setup-1.0.1.exe` has SHA256 `0DDBD05FDE8C8D7A3B90359E18E0A7E1254BBF0F4576D973E429591CBCB280C1`. `dist/SHA256SUMS.txt` matches all three.
+- The installed/running Keysor was not restarted. The old macOS artifacts in `dist` are unrelated to this Windows build. A clean-PC installation and real cursor/UI test are still pending; this is not a public-release signoff. Earlier notes that `dist` was not updated describe the earlier state.
+
 ## 2026-11-03 Independent Cursor Guardian Candidate
 
 - Replaced the unverified encoded-PowerShell and same-name-only watchdog startup path with `src/watchdog.rs`. The packaged `keysor-guardian.exe` is a separate process name, so stopping `keysor.exe` by image name does not target the guardian. Startup writes `.keysor/watchdog-startup.json` with guardian PID, independence, and readiness; after parent exit it writes `.keysor/watchdog-<parent-pid>.json` with wait and cursor-reload results.
@@ -676,3 +999,9 @@ See [WINDOWS_FIXES_MAC_HANDOFF.md](WINDOWS_FIXES_MAC_HANDOFF.md) for current com
 - macOS `simulate_page_jump`를 고정량 휠 스크롤에서 Command+Up/Down 합성 입력으로 바꿨다. 이는 [Apple의 문서 시작/끝 단축키](https://support.apple.com/en-us/102650)를 따르지만, 대상 앱별 실제 동작은 Mac에서 확인해야 한다.
 - Windows 검증: `scripts/test-windows.ps1`의 테스트 16개 통과, `cargo build --release --offline` 성공. 표준 `target/release/keysor.exe`를 새로 빌드했고 기존 바탕화면 바로가기도 이 파일을 가리키도록 확인했다. 검증 당시 실행 중인 프로세스는 이전 별도 빌드(`target/scroll-boost-build/release/keysor.exe`)에서 시작했으므로 표준 파일을 실행하려면 앱을 완전히 종료한 뒤 바로가기로 재시작해야 한다.
 - macOS 검증 경계: Windows에서 변경된 Rust 파일 2개의 구문 검사는 통과했다. `cargo check --target x86_64-apple-darwin --offline`은 Apple용 C 컴파일러 `cc`가 없어 의존성 빌드 단계에서 중단됐으므로 Mac 앱 빌드와 실기기 동작은 미검증이다. Mac에서 `cargo test --bin keysor` 실행 후 `bash scratch/package_mac_app.sh`로 앱을 빌드한다. Accessibility/Input Monitoring 권한을 확인하고 R/F -> Space(점프 1회·클릭/드래그 없음), Space -> R/F(일반 클릭/드래그/스크롤), R/F를 먼저 뗀 뒤 Space 해제, 길게 누르기/자동 반복, Q/E -> Space를 직접 시험한다. Windows 빌드는 Mac EventTap 및 앱 동작을 검증하지 않는다.
+
+### 2026-11-16 커서 입력 모션 회귀 수정
+- 네이티브 커서가 보이면 가시성 처리에서 조기 반환해 애니메이션이 실행되지 않았고, 네이티브 아트워크도 최초 프레임으로 고정돼 있었다.
+- 오버레이가 숨겨져도 입력 축소/복귀 및 색상 프레임을 처리하고 네이티브 커서에 재적용한다. 원격용 32px 커서에도 현재 축소 비율을 적용하며 이전 프레임 핸들을 해제한다. 일시정지에서는 기존 기본 커서 정책을 유지한다.
+- 버전 1.0.3 유지. 일반 테스트 55개 통과, 8개 대화형 테스트 제외. 릴리스/설치 파일 생성 성공.
+- target/click-motion-install.json: 정식 위치 적용/재시작 성공, 설정과 --chrome-remote --diagnose-input 인수 보존, 메인 PID31692 / Guardian PID55932. 실제 원격 클라이언트의 키 입력 모션은 직접 시각 확인하지 못했다.

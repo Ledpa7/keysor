@@ -1,3 +1,4 @@
+mod targets;
 use std::sync::{OnceLock, Mutex};
 use std::thread;
 use std::sync::atomic::Ordering;
@@ -448,64 +449,6 @@ pub fn check_magnetic_snapping() {
     }
 }
 
-fn scan_titlebar_targets(
-    element: &uiautomation::core::UIElement,
-    win_rect: &RECT,
-    true_cond: &uiautomation::core::UICondition,
-    clickable_types: &[i32],
-    depth: usize,
-    results: &mut Vec<uiautomation::core::UIElement>,
-) {
-    if depth > 6 {
-        return;
-    }
-    
-    let mut should_traverse = true;
-    
-    if let Ok(rect) = element.get_bounding_rectangle() {
-        let top = rect.get_top();
-        
-        // 만약 엘리먼트의 상단이 타이틀바 영역(win_rect.top + 100)보다 아래에 있다면 하위 탐색 중단 및 프루닝
-        if top > win_rect.top + 100 {
-            return;
-        }
-        
-        if let Ok(ctrl_type) = element.get_control_type() {
-            let ctrl_type_val = ctrl_type as i32;
-            
-            // Document 타입(웹 페이지 본문 등)은 하위 탐색하지 않음
-            if ctrl_type_val == 50030 {
-                return;
-            }
-            
-            // 클릭 가능한 대상 타입인 경우
-            if clickable_types.contains(&ctrl_type_val) {
-                should_traverse = false;
-                results.push(element.clone());
-            }
-        }
-    }
-    
-    let children_opt = if should_traverse {
-        element.find_all(uiautomation::types::TreeScope::Children, true_cond).ok()
-    } else {
-        None
-    };
-
-    if let Some(children) = children_opt {
-        for child in &children {
-            scan_titlebar_targets(
-                child,
-                win_rect,
-                true_cond,
-                clickable_types,
-                depth + 1,
-                results,
-            );
-        }
-    }
-}
-
 pub fn start_global_targets_thread() {
     thread::spawn(|| {
         let automation = match UIAutomation::new() {
@@ -552,9 +495,11 @@ pub fn start_global_targets_thread() {
             }
         };
         
+        let target_reader = targets::TargetReader::new(&automation);
         let mut last_hwnd = 0;
         let mut query_counter = 0;
         let mut last_query_pt: Option<windows_sys::Win32::Foundation::POINT> = None;
+        let mut last_query_at: Option<std::time::Instant> = None;
         
         loop {
             thread::sleep(std::time::Duration::from_millis(300));
@@ -575,6 +520,7 @@ pub fn start_global_targets_thread() {
                 last_hwnd = 0;
                 query_counter = 0;
                 last_query_pt = None;
+                last_query_at = None;
                 if let Some(mutex) = GLOBAL_SNAP_TARGETS.get() {
                     let mut targets = mutex.lock().unwrap();
                     if !targets.is_empty() {
@@ -624,6 +570,12 @@ pub fn start_global_targets_thread() {
             if force_refresh {
                 force_query = true;
             }
+
+            if hwnd == last_hwnd && force_query && !force_refresh
+                && last_query_at.is_some_and(|time| time.elapsed() < std::time::Duration::from_millis(900))
+            {
+                continue;
+            }
             
             if hwnd == last_hwnd && !force_query {
                 query_counter += 1;
@@ -633,9 +585,10 @@ pub fn start_global_targets_thread() {
             }
             query_counter = 0;
             last_query_pt = Some(pt);
+            last_query_at = Some(std::time::Instant::now());
             
             let handle = Handle::from(hwnd as isize);
-            let mut found_targets = false;
+            let mut scanned = false;
             
             let mut class_name = [0u16; 256];
             let len = unsafe { GetClassNameW(hwnd, class_name.as_mut_ptr(), 256) };
@@ -646,89 +599,17 @@ pub fn start_global_targets_thread() {
                 GetWindowRect(hwnd, &mut win_rect);
             }
             
-            if let Ok(element) = automation.element_from_handle(handle) {
-                let is_heavy = class_str == "Chrome_WidgetWin_1"
-                    || class_str == "MozillaWindowClass"
-                    || class_str == "ApplicationFrameWindow"
-                    || class_str == "CabinetWClass";
-
-                let mut elements = Vec::new();
-                if is_heavy {
-                    if let Ok(true_cond) = automation.create_true_condition() {
-                        scan_titlebar_targets(
-                            &element,
-                            &win_rect,
-                            &true_cond,
-                            &clickable_types,
-                            0,
-                            &mut elements,
-                        );
-                    }
-                } else {
-                    if let Ok(descendants) = element.find_all(uiautomation::types::TreeScope::Descendants, &condition) {
-                        elements = descendants;
-                    }
-                }
-
-                let mut new_targets = Vec::new();
-                for el in &elements {
-                    if let Ok(rect) = el.get_bounding_rectangle() {
-                        let left = rect.get_left();
-                        let top = rect.get_top();
-                        let right = rect.get_right();
-                        let bottom = rect.get_bottom();
-                        let w = right - left;
-                        let h = bottom - top;
-                        
-                        if w >= 5 && h >= 5 && w <= 800 && h <= 800 {
-                            let is_taskbar = class_str == "Shell_TrayWnd" || class_str == "SecondaryTrayWnd";
-                            let mut is_valid = is_taskbar;
-                            
-                            if !is_valid {
-                                // Check if it's in the top-left or top-right title bar area of the application window
-                                let in_titlebar_y = top >= win_rect.top - 20 && bottom <= win_rect.top + 80;
-                                let in_top_right = in_titlebar_y && right >= win_rect.right - 200 && left <= win_rect.right + 20;
-                                let in_top_left = in_titlebar_y && left >= win_rect.left - 20 && right <= win_rect.left + 220;
-                                
-                                if in_top_right || in_top_left {
-                                    is_valid = true;
-                                } else {
-                                    // Minimize/Maximize/Close ID/Name check as fallback
-                                    if let Ok(auto_id) = el.get_automation_id() {
-                                        let id_lower = auto_id.to_lowercase();
-                                        if id_lower.contains("minimize") || id_lower.contains("maximize") || id_lower.contains("close") || id_lower.contains("restore") {
-                                            is_valid = true;
-                                        }
-                                    }
-                                    if !is_valid && el.get_name().map(|name| {
-                                        let name_lower = name.to_lowercase();
-                                        name_lower.contains("최소화") || name_lower.contains("최대화") || name_lower.contains("닫기") || name_lower.contains("복원") ||
-                                        name_lower.contains("minimize") || name_lower.contains("maximize") || name_lower.contains("close") || name_lower.contains("restore")
-                                    }).unwrap_or(false) {
-                                        is_valid = true;
-                                    }
-                                }
-                            }
-                            
-                            if is_valid {
-                                new_targets.push((left + w / 2, top + h / 2));
-                            }
-                        }
-                    }
-                }
-                
-                found_targets = !new_targets.is_empty();
+            if let Ok(new_targets) = targets::scan_window_targets(
+                &automation, handle, &class_str, &win_rect, &condition, &clickable_types, &target_reader,
+            ) {
+                scanned = true;
                 log_debug(&format!("UIA thread found {} targets for HWND={}", new_targets.len(), hwnd));
-                new_targets.truncate(200);
                 let mut targets = GLOBAL_SNAP_TARGETS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap();
                 *targets = new_targets;
             }
-            
-            if found_targets {
-                last_hwnd = hwnd;
-            } else {
-                last_hwnd = 0;
-            }
+
+            // Cache empty scans too; the periodic refresh and explicit refresh still retry.
+            last_hwnd = if scanned { hwnd } else { 0 };
         }
     });
 }

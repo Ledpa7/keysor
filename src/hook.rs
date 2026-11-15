@@ -21,6 +21,22 @@ enum IndicatorAction {
     Hide,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum NativeCapsTransition {
+    Pass,
+    BlockRepeat,
+    PassAndHide,
+    PassAndSync,
+}
+
+fn dispatch_indicator(action: IndicatorAction) {
+    match action {
+        IndicatorAction::Show => crate::indicator::show_indicator(),
+        IndicatorAction::Hide => crate::indicator::hide_indicator(),
+        IndicatorAction::None => {}
+    }
+}
+
 /// 마우스 이동 제어를 위해 추출한 설정 파라미터 구조체
 pub struct MovementSettings {
     pub dx: f64,
@@ -65,6 +81,7 @@ pub struct AppState {
     pub active_scroll_keys: HashSet<u32>,
     pub scroll_start_time: Option<Instant>,
     // 모디파이어 단축키 판별용 물리 키 상태
+    pressed_modifier_keys: HashSet<u32>,
     pub ctrl_pressed: bool,
     pub alt_pressed: bool,
     pub win_pressed: bool,
@@ -141,25 +158,32 @@ impl AppState {
 
     /// 모디파이어 키의 눌림 상태를 갱신합니다.
     pub fn update_modifier_key_state(&mut self, vk_code: u32, is_keydown: bool) -> bool {
+        let group: &[u32] = match vk_code {
+            0x10 | 0xA0 | 0xA1 => &[0x10, 0xA0, 0xA1],
+            0x11 | 0xA2 | 0xA3 => &[0x11, 0xA2, 0xA3],
+            0x12 | 0xA4 | 0xA5 => &[0x12, 0xA4, 0xA5],
+            0x5B | 0x5C => &[0x5B, 0x5C],
+            _ => return false,
+        };
+        if is_keydown { self.pressed_modifier_keys.insert(vk_code); }
+        else { self.pressed_modifier_keys.remove(&vk_code); }
+        let pressed = group.iter().any(|key| self.pressed_modifier_keys.contains(key));
         match vk_code {
-            0x10 | 0xA0 | 0xA1 => { // VK_SHIFT, VK_LSHIFT, VK_RSHIFT
-                self.shift_pressed = is_keydown;
-                !self.vk_bindings.contains_key(&vk_code)
-            }
-            0x11 | 0xA2 | 0xA3 => { // VK_CONTROL, VK_LCONTROL, VK_RCONTROL
-                self.ctrl_pressed = is_keydown;
-                true
-            }
-            0x12 | 0xA4 | 0xA5 => { // VK_MENU, VK_LMENU, VK_RMENU
-                self.alt_pressed = is_keydown;
-                true
-            }
-            0x5B | 0x5C => { // VK_LWIN, VK_RWIN
-                self.win_pressed = is_keydown;
-                true
-            }
-            _ => false,
+            0x10 | 0xA0 | 0xA1 => self.shift_pressed = pressed,
+            0x11 | 0xA2 | 0xA3 => self.ctrl_pressed = pressed,
+            0x12 | 0xA4 | 0xA5 => self.alt_pressed = pressed,
+            _ => self.win_pressed = pressed,
         }
+        group[0] != 0x10 || !self.vk_bindings.contains_key(&vk_code)
+    }
+
+    /// Called only after the OS confirms every Ctrl/Alt/Win key is released.
+    pub fn clear_released_shortcut_modifiers(&mut self) {
+        self.pressed_modifier_keys.retain(|vk| !matches!(*vk,
+            0x11 | 0xA2 | 0xA3 | 0x12 | 0xA4 | 0xA5 | 0x5B | 0x5C));
+        self.ctrl_pressed = false;
+        self.alt_pressed = false;
+        self.win_pressed = false;
     }
 
     /// 시스템 기본 단축키 조합이 눌려 있는지 여부를 확인합니다.
@@ -239,8 +263,11 @@ impl AppState {
             config::get_vk_bindings(&config::Config::default())
         };
 
+        let keep_native_caps_mode = cfg!(windows) && self.is_mouse_mode
+            && uses_native_caps_lock(&self.config) && uses_native_caps_lock(&new_config);
+        let native_caps_press = if keep_native_caps_mode { self.caps_lock_press_time } else { None };
         self.deactivate_mouse_mode();
-        self.caps_lock_press_time = None;
+        self.caps_lock_press_time = native_caps_press;
         self.config = if features_enabled {
             new_config
         } else {
@@ -252,11 +279,29 @@ impl AppState {
             forced.settings.acceleration = 1.5;
             forced
         };
+        if keep_native_caps_mode { self.is_mouse_mode = true; }
         println!("[Hot-Reload] New configuration evaluated and applied. Pro features: {}.", features_enabled);
     }
 }
 
 pub static APP_STATE: OnceLock<Arc<Mutex<AppState>>> = OnceLock::new();
+
+#[cfg(windows)]
+static NATIVE_CAPS_SYNC: OnceLock<std::sync::mpsc::SyncSender<()>> = OnceLock::new();
+
+#[cfg(windows)]
+pub fn init_native_caps_sync() -> std::sync::mpsc::Receiver<()> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    NATIVE_CAPS_SYNC.set(tx).expect("CapsLock sync already initialized");
+    rx
+}
+
+#[cfg(windows)]
+fn request_native_caps_sync() {
+    if let Some(tx) = NATIVE_CAPS_SYNC.get() {
+        let _ = tx.try_send(());
+    }
+}
 static KEYBOARD_HOOK: OnceLock<Box<dyn KeyboardHook>> = OnceLock::new();
 
 #[cfg(windows)]
@@ -486,6 +531,8 @@ enum PendingMouseAction {
     VirtualDesktopRight,
     TabLeft,
     TabRight,
+    Beep,
+    Enter,
     RunApp(String),
 }
 
@@ -569,6 +616,8 @@ fn execute_pending_action_now(action: PendingMouseAction) {
         PendingMouseAction::VirtualDesktopRight => get_system_controller().simulate_virtual_desktop_navigation(true),
         PendingMouseAction::TabLeft => get_system_controller().simulate_tab_navigation(false),
         PendingMouseAction::TabRight => get_system_controller().simulate_tab_navigation(true),
+        PendingMouseAction::Beep => get_system_controller().beep(),
+        PendingMouseAction::Enter => get_system_controller().simulate_enter_key(),
         PendingMouseAction::RunApp(app_path) => {
             get_system_controller().run_app(&app_path).ok();
         }
@@ -615,7 +664,58 @@ fn handle_space_release(state_ptr: Arc<Mutex<AppState>>) {
     });
 }
 
-/// Caps Lock 관련 모드 전환 및 동기화 이벤트를 처리합니다.
+// Windows owns the physical CapsLock toggle; Keysor mirrors each real press.
+pub(crate) fn uses_native_caps_lock(config: &Config) -> bool {
+    config.settings.modifier_mode.eq_ignore_ascii_case("Toggle")
+        && config::key_name_to_vk(&config.settings.modifier_key) == Some(VK_CAPITAL)
+}
+
+fn apply_native_caps_state(state: &mut AppState, caps_on: bool) -> IndicatorAction {
+    if state.is_mouse_mode == caps_on { return IndicatorAction::None; }
+    if caps_on {
+        state.is_mouse_mode = true;
+        IndicatorAction::Show
+    } else {
+        state.deactivate_mouse_mode();
+        IndicatorAction::Hide
+    }
+}
+
+fn process_native_caps_toggle(state: &mut AppState, event: &KeyEvent) -> NativeCapsTransition {
+    if event.is_keydown {
+        if !begin_modifier_press(&mut state.caps_lock_press_time) {
+            return NativeCapsTransition::BlockRepeat;
+        }
+        // Fail open until Windows has processed the CapsLock transition.
+        if state.is_mouse_mode {
+            state.deactivate_mouse_mode();
+            return NativeCapsTransition::PassAndHide;
+        }
+        return NativeCapsTransition::PassAndSync;
+    }
+    if event.is_keyup {
+        state.caps_lock_press_time = None;
+        return NativeCapsTransition::PassAndSync;
+    }
+    NativeCapsTransition::Pass
+}
+
+#[cfg(windows)]
+pub fn sync_native_caps_lock() {
+    let Some(state_arc) = APP_STATE.get() else { return; };
+    {
+        let state = state_arc.lock().unwrap();
+        if !uses_native_caps_lock(&state.config) { return; }
+    }
+    let caps_on = get_system_controller().is_caps_lock_on();
+    let action = {
+        let mut state = state_arc.lock().unwrap();
+        if !uses_native_caps_lock(&state.config) { return; }
+        apply_native_caps_state(&mut state, caps_on)
+    };
+    dispatch_indicator(action);
+}
+
 fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
     let state_arc = APP_STATE.get()?;
     let configured_vk = {
@@ -630,6 +730,32 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
 
     #[cfg(windows)]
     crate::diagnostics::record_activation(event.is_keydown, event.is_keyup);
+
+    let native_result = {
+        let mut state = state_arc.lock().unwrap();
+        if cfg!(windows) && uses_native_caps_lock(&state.config) {
+            Some(process_native_caps_toggle(&mut state, event))
+        } else {
+            None
+        }
+    };
+    if let Some(result) = native_result {
+        return Some(match result {
+            NativeCapsTransition::Pass => HookResult::Pass,
+            NativeCapsTransition::BlockRepeat => HookResult::Block,
+            NativeCapsTransition::PassAndHide => {
+                #[cfg(windows)]
+                request_native_caps_sync();
+                dispatch_indicator(IndicatorAction::Hide);
+                HookResult::Pass
+            }
+            NativeCapsTransition::PassAndSync => {
+                #[cfg(windows)]
+                request_native_caps_sync();
+                HookResult::Pass
+            }
+        });
+    }
 
     let mut indicator_action = IndicatorAction::None;
 
@@ -674,11 +800,7 @@ fn process_caps_lock(event: &KeyEvent) -> Option<HookResult> {
         }
     }
 
-    match indicator_action {
-        IndicatorAction::Show => crate::indicator::show_indicator(),
-        IndicatorAction::Hide => crate::indicator::hide_indicator(),
-        IndicatorAction::None => {}
-    }
+    dispatch_indicator(indicator_action);
 
     Some(HookResult::Block)
 }
@@ -841,7 +963,7 @@ fn process_movement_and_actions(
                 if state.is_pro || state.is_trial {
                     pending_action = action;
                 } else {
-                    get_system_controller().beep();
+                    pending_action = PendingMouseAction::Beep;
                     println!("[License] J/K Tab switching is a Pro-only feature.");
                 }
             }
@@ -884,7 +1006,7 @@ fn process_movement_and_actions(
                                 let app_path = other.trim_start_matches("RunApp:").trim().to_string();
                                 pending_action = PendingMouseAction::RunApp(app_path);
                             } else {
-                                get_system_controller().beep();
+                                pending_action = PendingMouseAction::Beep;
                                 println!("[License] RunApp shortcut is a Pro-only feature.");
                             }
                         }
@@ -936,14 +1058,27 @@ fn is_allowed_pass_through_key(vk_code: u32) -> bool {
 }
 
 /// 공통 키보드 훅 이벤트 리시버 콜백
+fn process_shift_space(is_keydown: bool) -> HookResult {
+    if is_keydown {
+        println!("[Action] Shift + Space -> Enter simulated");
+        execute_pending_action(PendingMouseAction::Enter);
+    }
+    HookResult::Block
+}
 fn handle_keyboard_event(event: KeyEvent) -> HookResult {
     if event.is_injected_by_keysor {
         return HookResult::Pass;
     }
 
+    #[cfg(windows)]
+    crate::caps_hold::observe(&event);
+    #[cfg(windows)]
+    crate::win_shortcuts::observe(&event);
+
     if let Some(result) = process_caps_lock(&event) {
         return result;
     }
+
 
     if let Some(state_arc) = APP_STATE.get() {
         let release_space = {
@@ -1052,11 +1187,7 @@ fn handle_keyboard_event(event: KeyEvent) -> HookResult {
                 state.shift_pressed
             };
             if event.vk_code == VK_SPACE && is_shift_down {
-                if event.is_keydown {
-                    println!("[Action] Shift + Space -> Enter simulated");
-                    get_system_controller().simulate_enter_key();
-                }
-                return HookResult::Block;
+                return process_shift_space(event.is_keydown);
             }
 
             let unified_space = {
@@ -1114,6 +1245,7 @@ fn initial_state(config: Config, is_pro: bool, is_trial: bool) -> AppState {
         movement_start_time: None,
         active_scroll_keys: HashSet::new(),
         scroll_start_time: None,
+        pressed_modifier_keys: HashSet::new(),
         ctrl_pressed,
         alt_pressed,
         win_pressed,
@@ -1123,12 +1255,13 @@ fn initial_state(config: Config, is_pro: bool, is_trial: bool) -> AppState {
 }
 
 pub fn start_hook(config: Config, is_pro: bool, is_trial: bool) -> Result<(), String> {
+    let native_caps_mode = cfg!(windows) && uses_native_caps_lock(&config);
     let state = Arc::new(Mutex::new(initial_state(config, is_pro, is_trial)));
 
     APP_STATE.set(Arc::clone(&state)).ok();
 
     // 0. 초기 구동 시 Caps Lock 상태를 안전하게 OFF로 리셋
-    get_system_controller().ensure_caps_lock_off();
+    if !native_caps_mode { get_system_controller().ensure_caps_lock_off(); }
 
     // Windows 고정밀 1ms 멀티미디어 타이머 활성화
     #[cfg(windows)]
@@ -1158,7 +1291,11 @@ pub fn cleanup_hook() {
     if let Some(hook) = KEYBOARD_HOOK.get() {
         hook.stop_listening();
     }
-    get_system_controller().ensure_caps_lock_off();
+    let native_caps_mode = APP_STATE.get().is_some_and(|state| {
+        let state = state.lock().unwrap();
+        cfg!(windows) && uses_native_caps_lock(&state.config)
+    });
+    if !native_caps_mode { get_system_controller().ensure_caps_lock_off(); }
     // Restore system cursor on exit if it was hidden
     #[cfg(windows)]
     crate::ui::win_gdi::restore_system_cursor();
@@ -1196,6 +1333,106 @@ pub fn modifier_sync_guard() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "Measures diagnostic lock duration with native Windows reads; no keyboard hook or clipboard changes"]
+    fn native_diagnostic_lock_benchmark() {
+        crate::diagnostics::benchmark_input_snapshot(&Mutex::new(state()));
+    }
+
+    #[test]
+    fn queued_enter_runs_only_for_shift_space_keydown() {
+        for is_keydown in [true, false] {
+            assert!(matches!(process_shift_space(is_keydown), HookResult::Block));
+            assert_eq!(actions(), if is_keydown { vec![PendingMouseAction::Enter] } else { vec![] });
+        }
+    }
+    #[test]
+    fn unlicensed_tab_shortcuts_queue_beep_without_os_call() {
+        let mut s = initial_state(Config::default(), false, false);
+        s.is_mouse_mode = true;
+        for vk in [VK_J, VK_K] {
+            let (result, action) = process_movement_and_actions(&mut s, vk, true, false);
+            assert!(matches!(result, HookResult::Block));
+            assert_eq!(action, PendingMouseAction::Beep);
+            let (result, action) = process_movement_and_actions(&mut s, vk, false, true);
+            assert!(matches!(result, HookResult::Block));
+            assert_eq!(action, PendingMouseAction::None);
+        }
+    }
+
+    #[test]
+    fn unlicensed_run_app_queues_beep_without_launching() {
+        let mut s = initial_state(Config::default(), false, false);
+        s.is_mouse_mode = true;
+        s.vk_bindings.insert(VK_Q, "RunApp:calc.exe".to_string());
+        let (result, action) = process_movement_and_actions(&mut s, VK_Q, true, false);
+        assert!(matches!(result, HookResult::Block));
+        assert_eq!(action, PendingMouseAction::Beep);
+        let (result, action) = process_movement_and_actions(&mut s, VK_Q, false, true);
+        assert!(matches!(result, HookResult::Block));
+        assert_eq!(action, PendingMouseAction::None);
+    }
+    #[test]
+    fn native_caps_state_follows_os_and_releases_input_when_off() {
+        let mut s = initial_state(Config::default(), true, false);
+        assert!(uses_native_caps_lock(&s.config));
+        assert_eq!(apply_native_caps_state(&mut s, true), IndicatorAction::Show);
+        assert!(s.is_mouse_mode);
+        assert_eq!(apply_native_caps_state(&mut s, true), IndicatorAction::None);
+        assert_eq!(apply_native_caps_state(&mut s, false), IndicatorAction::Hide);
+        assert!(!s.is_mouse_mode);
+        let down = KeyEvent { vk_code: VK_CAPITAL, is_keydown: true, is_keyup: false, is_injected_by_keysor: false };
+        let up = KeyEvent { vk_code: VK_CAPITAL, is_keydown: false, is_keyup: true, is_injected_by_keysor: false };
+        assert_eq!(process_native_caps_toggle(&mut s, &down), NativeCapsTransition::PassAndSync);
+        assert!(!s.is_mouse_mode);
+        assert_eq!(process_native_caps_toggle(&mut s, &down), NativeCapsTransition::BlockRepeat);
+        // The scheduled sync activates input while CapsLock is still held.
+        assert_eq!(apply_native_caps_state(&mut s, true), IndicatorAction::Show);
+        assert!(s.is_mouse_mode);
+        assert!(s.caps_lock_press_time.is_some());
+        assert_eq!(process_native_caps_toggle(&mut s, &up), NativeCapsTransition::PassAndSync);
+        s.active_movement_keys.insert(0x57);
+        s.active_scroll_keys.insert(0x46);
+        assert_eq!(process_native_caps_toggle(&mut s, &down), NativeCapsTransition::PassAndHide);
+        assert!(!s.is_mouse_mode);
+        assert!(s.active_movement_keys.is_empty());
+        assert!(s.active_scroll_keys.is_empty());
+        assert_eq!(process_native_caps_toggle(&mut s, &up), NativeCapsTransition::PassAndSync);
+    }
+    #[test]
+    fn sided_modifiers_remain_pressed_until_both_sides_are_released() {
+        for (left, right) in [(0xA0, 0xA1), (0xA2, 0xA3), (0xA4, 0xA5), (0x5B, 0x5C)] {
+            let mut s = initial_state(Config::default(), true, false);
+            let pressed = |s: &AppState| match left {
+                0xA0 => s.shift_pressed, 0xA2 => s.ctrl_pressed,
+                0xA4 => s.alt_pressed, _ => s.win_pressed,
+            };
+            s.update_modifier_key_state(left, true);
+            s.update_modifier_key_state(right, true);
+            s.update_modifier_key_state(right, true);
+            s.update_modifier_key_state(left, false);
+            assert!(pressed(&s));
+            s.update_modifier_key_state(right, false);
+            assert!(!pressed(&s));
+        }
+    }
+
+    #[test]
+    fn configuration_reload_keeps_native_caps_lock_mode_in_sync() {
+        let mut s = initial_state(Config::default(), true, false);
+        s.is_mouse_mode = true;
+        let mut changed = s.config.clone();
+        changed.settings.base_speed += 0.1;
+        s.apply_file_configuration(changed);
+        assert!(s.is_mouse_mode);
+        assert!(actions().is_empty());
+        s.caps_lock_press_time = Some(Instant::now());
+        let mut changed = s.config.clone();
+        changed.settings.base_speed += 0.1;
+        s.apply_file_configuration(changed);
+        assert!(s.caps_lock_press_time.is_some());
+    }
     #[test]
     fn saved_magnet_toggle_does_not_deactivate_input() {
         let mut s = initial_state(Config::default(), true, false);
@@ -1360,6 +1597,91 @@ mod tests {
         assert!(release);
         assert_eq!(s.space_tap_count, 1);
         assert!(actions().is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "Requires interactive Windows; opens a temporary HUD without installing an input hook"]
+    fn native_caps_hold_opens_hud_in_both_modes_without_extra_toggle() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{IsWindowVisible, ShowWindow, SW_MINIMIZE};
+        let state = Arc::new(Mutex::new(initial_state(Config::default(), true, false)));
+        assert!(APP_STATE.set(Arc::clone(&state)).is_ok());
+        crate::indicator::start_indicator();
+        for _ in 0..100 {
+            if crate::ui::win_gdi::HUD_HWND.get().is_some() { break; }
+            thread::sleep(Duration::from_millis(20));
+        }
+        let main = *crate::ui::win_gdi::MAIN_HWND.get().expect("Main window");
+        let hud = *crate::ui::win_gdi::HUD_HWND.get().expect("HUD window");
+        let down = KeyEvent { vk_code: VK_CAPITAL, is_keydown: true, is_keyup: false, is_injected_by_keysor: false };
+        let up = KeyEvent { vk_code: VK_CAPITAL, is_keydown: false, is_keyup: true, is_injected_by_keysor: false };
+        for mode in [false, true] {
+            state.lock().unwrap().is_mouse_mode = mode;
+            unsafe { ShowWindow(main, SW_MINIMIZE); }
+            thread::sleep(Duration::from_millis(100));
+            assert_eq!(unsafe { IsWindowVisible(hud) }, 0);
+            let caps_before = get_system_controller().is_caps_lock_on();
+            crate::caps_hold::observe(&down);
+            thread::sleep(Duration::from_millis(350));
+            assert_eq!(unsafe { IsWindowVisible(hud) }, 0, "Opened before half a second");
+            for _ in 0..50 {
+                if unsafe { IsWindowVisible(hud) } != 0 { break; }
+                thread::sleep(Duration::from_millis(20));
+            }
+            assert_ne!(unsafe { IsWindowVisible(hud) }, 0, "HUD did not reopen");
+            assert_eq!(state.lock().unwrap().is_mouse_mode, mode);
+            assert_eq!(get_system_controller().is_caps_lock_on(), caps_before);
+            crate::caps_hold::observe(&up);
+        }
+        crate::cursor_scheme::verify_native_artwork_and_restore();
+        crate::ui::win_gdi::assert_no_normal_mode_cursor_restore();
+        crate::ui::win_gdi::assert_cursor_style_update_budget();
+        crate::ui::win_gdi::assert_single_cursor_windows();
+        // Follow the production HUD coordinate hit path into the support window.
+        let scale = get_system_controller().get_dpi_scale();
+        let x = (700.0 * scale) as isize;
+        let y = (414.0 * scale) as isize;
+        unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW(hud,
+                windows_sys::Win32::UI::WindowsAndMessaging::WM_LBUTTONDOWN, 1, x | (y << 16));
+        }
+        for _ in 0..100 {
+            if crate::support::window_for_test() != 0 { break; }
+            thread::sleep(Duration::from_millis(20));
+        }
+        let support = crate::support::window_for_test();
+        assert_ne!(support, 0, "HUD info link did not open support");
+        unsafe {
+            use windows_sys::Win32::UI::WindowsAndMessaging::*;
+            // Wait until its controls and visible state are ready, then close it normally.
+            for _ in 0..100 {
+                if IsWindowVisible(support) != 0 && GetDlgItem(support, 103) != 0 { break; }
+                thread::sleep(Duration::from_millis(20));
+            }
+            assert_ne!(IsWindowVisible(support), 0);
+            assert_ne!(GetDlgItem(support, 201), 0);
+            SendMessageW(support, WM_CLOSE, 0, 0);
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    #[test]
+    fn lost_modifier_release_does_not_resurrect_after_recovery() {
+        let mut s = initial_state(Config::default(), true, false);
+        for vk in [0x11, 0xA2, 0x12, 0xA4, 0x5B, 0xA0] { s.update_modifier_key_state(vk, true); }
+        s.clear_released_shortcut_modifiers();
+        assert!(!s.is_system_shortcut_active());
+        assert!(s.shift_pressed, "Recovery must preserve a genuinely held Shift");
+        assert_eq!(s.pressed_modifier_keys.len(), 1);
+        for (vk, old) in [(0xA3, 0xA2), (0xA5, 0xA4), (0x5C, 0x5B)] {
+            assert!(!s.pressed_modifier_keys.contains(&old));
+            s.update_modifier_key_state(vk, true);
+            assert!(s.is_system_shortcut_active());
+            s.update_modifier_key_state(vk, false);
+            assert!(!s.is_system_shortcut_active(), "An old opposite-side key must not reappear");
+        }
+        s.update_modifier_key_state(0xA0, false);
+        assert!(!s.shift_pressed);
     }
 
 }

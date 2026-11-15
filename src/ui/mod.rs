@@ -61,3 +61,6 @@ pub fn get_ui() -> &'static dyn KeysorUi {
         }
     }).as_ref()
 }
+
+#[cfg(all(windows, test))]
+pub(crate) mod test_capture;

@@ -180,6 +180,9 @@ pub fn check_trial_status() -> bool {
 }
 
 /// 로컬 캐싱된 라이선스 유효성 검증
+const KEYSOR_PRODUCT_ID: u64 = 1180943;
+const PRODUCT_MISMATCH: &str = "License product mismatch";
+
 const RECHECK_SECS: u64 = 14 * 24 * 60 * 60;
 const OFFLINE_LIMIT_SECS: u64 = 2 * RECHECK_SECS;
 static LICENSE_REQUEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -189,6 +192,7 @@ struct CachedLicense {
     machine: String,
     timestamp: u64,
     instance: Option<String>,
+    product_id: Option<u64>,
 }
 
 fn now_secs() -> u64 {
@@ -198,11 +202,16 @@ fn now_secs() -> u64 {
 fn cached_license() -> Option<CachedLicense> {
     let data = fs::read(get_keysor_dir().join(".license")).ok()?;
     let plain = deobfuscate(&data)?;
+    parse_cached_license(&plain)
+}
+
+fn parse_cached_license(plain: &str) -> Option<CachedLicense> {
     let parts: Vec<_> = plain.split('|').collect();
     if parts.len() < 4 || parts[2] != "active" || parts[0].is_empty() { return None; }
     Some(CachedLicense {
         key: parts[0].to_string(), machine: parts[1].to_string(), timestamp: parts[3].parse().ok()?,
         instance: parts.get(4).filter(|id| !id.is_empty()).map(|id| id.to_string()),
+        product_id: match parts.get(5) { Some(id) => Some(id.parse().ok()?), None => None },
     })
 }
 
@@ -210,12 +219,23 @@ fn cache_is_current(timestamp: u64, now: u64) -> bool {
     now.checked_sub(timestamp).is_some_and(|elapsed| elapsed < OFFLINE_LIMIT_SECS)
 }
 
+fn cached_entitlement_is_current(license: &CachedLicense, now: u64) -> bool {
+    // Legacy caches retain their existing, bounded offline grace while migration
+    // is attempted online; a known foreign product is never accepted locally.
+    license.product_id.is_none_or(|id| id == KEYSOR_PRODUCT_ID) && cache_is_current(license.timestamp, now)
+}
+
+fn license_needs_recheck(license: &CachedLicense, now: u64) -> bool {
+    license.product_id != Some(KEYSOR_PRODUCT_ID)
+        || now.checked_sub(license.timestamp).is_none_or(|age| age >= RECHECK_SECS)
+}
+
 pub fn check_local_license() -> bool {
-    cached_license().is_some_and(|lic| machine_id_matches(&lic.machine) && cache_is_current(lic.timestamp, now_secs()))
+    cached_license().is_some_and(|lic| machine_id_matches(&lic.machine) && cached_entitlement_is_current(&lic, now_secs()))
 }
 
 fn save_license(key: &str, instance: Option<&str>) -> Result<(), String> {
-    let token = format!("{}|{}|active|{}|{}", key, get_machine_id(), now_secs(), instance.unwrap_or(""));
+    let token = format!("{}|{}|active|{}|{}|{}", key, get_machine_id(), now_secs(), instance.unwrap_or(""), KEYSOR_PRODUCT_ID);
     crate::config::atomic_write(&get_keysor_dir().join(".license"), &obfuscate(&token))
         .map_err(|e| format!("Cannot save license cache: {}", e))
 }
@@ -230,16 +250,44 @@ fn license_request(endpoint: &str, form: &[(&str, &str)]) -> Result<Value, Strin
     }
 }
 
-fn validate_cached_license(license: &CachedLicense) -> Result<(), String> {
-    let mut form = vec![("license_key", license.key.as_str())];
-    if let Some(id) = license.instance.as_deref() { form.push(("instance_id", id)); }
-    let json = license_request("validate", &form)?;
-    match json["valid"].as_bool() {
+fn validate_license_response(json: &Value, success_field: &str) -> Result<(), String> {
+    match json.get(success_field).and_then(Value::as_bool) {
         Some(true) => {},
         Some(false) => return Err("License rejected".into()),
         None => return Err("Invalid license response".into()),
     }
+    match json.get("meta").and_then(|meta| meta.get("product_id")).and_then(Value::as_u64) {
+        Some(KEYSOR_PRODUCT_ID) => Ok(()),
+        Some(_) => Err(PRODUCT_MISMATCH.into()),
+        None => Err("Invalid license response".into()),
+    }
+}
+
+fn validate_cached_license(license: &CachedLicense) -> Result<(), String> {
+    let mut form = vec![("license_key", license.key.as_str())];
+    if let Some(id) = license.instance.as_deref() { form.push(("instance_id", id)); }
+    let json = license_request("validate", &form)?;
+    if let Err(error) = validate_license_response(&json, "valid") {
+        if (error == PRODUCT_MISMATCH || error == "License rejected")
+            && cached_license().is_some_and(|current| current.key == license.key) {
+            let _ = fs::remove_file(get_keysor_dir().join(".license"));
+        }
+        return Err(error);
+    }
     save_license(&license.key, license.instance.as_deref())
+}
+
+fn request_product_activation(
+    key: &str, machine: &str,
+    mut request: impl FnMut(&str, &[(&str, &str)]) -> Result<Value, String>,
+) -> Result<String, String> {
+    // Preflight has no activation side effect; foreign keys must stop here.
+    let preflight = request("validate", &[("license_key", key)])?;
+    validate_license_response(&preflight, "valid")?;
+    let json = request("activate", &[("license_key", key), ("instance_name", machine)])?;
+    validate_license_response(&json, "activated")?;
+    json["instance"]["id"].as_str().filter(|id| !id.is_empty())
+        .map(str::to_owned).ok_or_else(|| "Activation response has no instance ID".into())
 }
 
 pub fn activate_license(license_key: &str) -> Result<String, String> {
@@ -250,12 +298,8 @@ pub fn activate_license(license_key: &str) -> Result<String, String> {
     if let Some(cached) = cached_license().filter(|c| c.key == key && machine_id_matches(&c.machine)) {
         validate_cached_license(&cached)?;
     } else {
-        let machine = get_machine_id();
-        let json = license_request("activate", &[("license_key", key), ("instance_name", &machine)])?;
-        if json["activated"].as_bool() != Some(true) { return Err("Activation rejected".into()); }
-        let instance = json["instance"]["id"].as_str().filter(|id| !id.is_empty())
-            .ok_or("Activation response has no instance ID")?;
-        save_license(key, Some(instance))?;
+        let instance = request_product_activation(key, &get_machine_id(), license_request)?;
+        save_license(key, Some(&instance))?;
     }
     Ok("Pro License activated successfully!".into())
 }
@@ -305,7 +349,11 @@ pub fn start_auto_activation_worker(license_key: String) {
                     }
                 };
 
-                if e.contains("Status code 400") {
+                if e == PRODUCT_MISMATCH {
+                    show_alert(if lang_en { "Wrong Product License" } else { "다른 상품의 라이선스" },
+                        if lang_en { "This license belongs to another product. Please enter a Keysor license key." }
+                        else { "이 라이선스는 다른 상품용입니다. Keysor 라이선스 키를 입력해 주세요." });
+                } else if e.contains("Status code 400") {
                     let title = if lang_en { "License Limit Exceeded" } else { "라이선스 기기 한도 초과" };
                     let msg = if lang_en {
                         "This license key has reached its activation limit (2 devices).\n\nPlease deactivate an existing device from the Lemon Squeezy portal and try again."
@@ -376,11 +424,11 @@ pub fn start_license_verification_scheduler() {
             if last_attempt.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(3600)) {
                 if let Ok(_guard) = LICENSE_REQUEST.lock() {
                     if let Some(cached) = cached_license().filter(|c| machine_id_matches(&c.machine)) {
-                        if now_secs().checked_sub(cached.timestamp).is_none_or(|age| age >= RECHECK_SECS) {
+                        if license_needs_recheck(&cached, now_secs()) {
                             last_attempt = Some(std::time::Instant::now());
                             if let Err(error) = validate_cached_license(&cached) {
                                 // Keep expired caches for recovery without creating another activation.
-                                if error == "License rejected" || error == "Status code 404" {
+                                if error == "License rejected" || error == "Status code 404" || error == PRODUCT_MISMATCH {
                                     let _ = fs::remove_file(get_keysor_dir().join(".license"));
                                 }
                                 eprintln!("[License] {}", error);
@@ -410,6 +458,85 @@ mod tests {
         let line = "    \"IOPlatformUUID\" = \"12345678-1234-1234-1234-123456789ABC\"";
         assert_eq!(extract_ioplatform_uuid(line), Some("12345678-1234-1234-1234-123456789ABC"));
         assert_eq!(extract_ioplatform_uuid("IOPlatformUUID = bad"), None);
+    }
+
+    #[test]
+    fn only_keysor_product_is_accepted_for_activation_and_validation() {
+        for field in ["valid", "activated"] {
+            let mut response = serde_json::json!({"meta":{"product_id":1180943}});
+            response[field] = Value::Bool(true);
+            assert!(validate_license_response(&response, field).is_ok());
+            response["meta"]["product_id"] = serde_json::json!(1180944);
+            assert_eq!(validate_license_response(&response, field), Err(PRODUCT_MISMATCH.into()));
+            response["meta"] = serde_json::json!({"variant_id":1180943});
+            assert!(validate_license_response(&response, field).is_err(), "Variant ID must not stand in for product ID");
+            response["meta"] = serde_json::json!({"product_id":1180943});
+            response[field] = Value::Bool(false);
+            assert!(validate_license_response(&response, field).is_err());
+        }
+    }
+
+    #[test]
+    fn malformed_product_metadata_fails_closed() {
+        for meta in [Value::Null, serde_json::json!({}), serde_json::json!({"product_id":"1180943"}),
+            serde_json::json!({"product_id":-1}), serde_json::json!({"product_id":1180943.5})] {
+            assert!(validate_license_response(&serde_json::json!({"valid":true,"meta":meta}), "valid").is_err());
+        }
+        assert!(validate_license_response(&serde_json::json!({"meta":{"product_id":1180943}}), "valid").is_err());
+    }
+
+    #[test]
+    fn legacy_cache_migrates_without_extending_offline_grace() {
+        let legacy = parse_cached_license("test-key|test-machine|active|100|old-instance").unwrap();
+        assert!(cached_entitlement_is_current(&legacy, 101));
+        assert!(license_needs_recheck(&legacy, 101), "Legacy caches must be rechecked immediately");
+        assert!(!cached_entitlement_is_current(&legacy, 100 + OFFLINE_LIMIT_SECS));
+        let current = parse_cached_license("test-key|test-machine|active|100|old-instance|1180943").unwrap();
+        assert!(cached_entitlement_is_current(&current, 101));
+        assert!(!license_needs_recheck(&current, 101));
+        assert!(license_needs_recheck(&current, 100 + RECHECK_SECS));
+        let foreign = parse_cached_license("test-key|test-machine|active|100|old-instance|999").unwrap();
+        assert!(!cached_entitlement_is_current(&foreign, 101));
+        assert!(parse_cached_license("test-key|test-machine|active|100|old-instance|invalid").is_none());
+    }
+
+    #[test]
+    fn foreign_product_never_consumes_an_activation_slot() {
+        let mut calls = Vec::new();
+        let result = request_product_activation("test-key", "test-machine", |endpoint, _| {
+            calls.push(endpoint.to_owned());
+            Ok(serde_json::json!({"valid":true,"meta":{"product_id":999}}))
+        });
+        assert_eq!(result, Err(PRODUCT_MISMATCH.into()));
+        assert_eq!(calls, ["validate"]);
+    }
+
+    #[test]
+    fn activation_requires_matching_product_again_and_a_device_instance() {
+        for product in [1180943, 999] {
+            let mut calls = Vec::new();
+            let result = request_product_activation("test-key", "test-machine", |endpoint, form| {
+                calls.push(endpoint.to_owned());
+                assert_eq!(form[0], ("license_key", "test-key"));
+                Ok(if endpoint == "validate" {
+                    serde_json::json!({"valid":true,"meta":{"product_id":1180943}})
+                } else {
+                    serde_json::json!({"activated":true,"meta":{"product_id":product},"instance":{"id":"test-instance"}})
+                })
+            });
+            assert_eq!(calls, ["validate", "activate"]);
+            if product == KEYSOR_PRODUCT_ID { assert_eq!(result.unwrap(), "test-instance"); }
+            else { assert_eq!(result, Err(PRODUCT_MISMATCH.into())); }
+        }
+        let mut count = 0;
+        assert!(request_product_activation("test-key", "test-machine", |_, _| {
+            count += 1;
+            Err("License network request failed".into())
+        }).is_err());
+        assert_eq!(count, 1);
+        assert!(request_product_activation("test-key", "test-machine", |endpoint, _| {
+            Ok(serde_json::json!({"valid":true,"activated":endpoint == "activate","meta":{"product_id":1180943}}))
+        }).is_err(), "A successful activation must supply its reusable instance ID");
     }
 
 }

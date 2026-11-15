@@ -9,7 +9,17 @@ mod update;
 #[cfg(windows)]
 mod diagnostics;
 #[cfg(windows)]
+mod support;
+#[cfg(windows)]
+mod caps_hold;
+#[cfg(windows)]
+mod win_shortcuts;
+#[cfg(windows)]
+mod cursor_scheme;
+#[cfg(windows)]
 mod watchdog;
+#[cfg(windows)]
+mod watchdog_core;
 
 mod indicator;
 mod ui;
@@ -87,6 +97,18 @@ fn main() {
     platform::windows::set_chrome_remote_mode(args.iter().any(|arg| arg == "--chrome-remote"));
     #[cfg(target_os = "windows")]
     {
+        #[cfg(debug_assertions)]
+        if args.get(1).is_some_and(|arg| arg == "--preview-support") {
+            // Development-only UI check: no input hook, watchdog or single-instance changes.
+            let _ = support::show(!args.iter().any(|arg| arg == "--korean")).join();
+            return;
+        }
+        // Hook-free report for support and installer validation.
+        if args.get(1).is_some_and(|arg| arg == "--support-report") {
+            let Some(output) = args.get(2) else { std::process::exit(2); };
+            if fs::write(output, support::report_text()).is_err() { std::process::exit(2); }
+            return;
+        }
         // Verify the installed token without starting hooks, windows, or watchdogs.
         if args.get(1).is_some_and(|arg| arg == "--diagnose-uiaccess") {
             let Some(output) = args.get(2) else { std::process::exit(2); };
@@ -112,7 +134,7 @@ fn main() {
 
         if args.len() >= 3 && args[1] == "--watchdog" {
             if let (Ok(pid), Some(report_path)) = (args[2].parse::<u32>(), args.get(3)) {
-                watchdog::run(pid, Path::new(report_path));
+                watchdog_core::run(pid, Path::new(report_path));
                 return;
             }
             std::process::exit(2);
@@ -233,6 +255,8 @@ fn main() {
     indicator::start_indicator();
 
     // 5. 백그라운드 윈도우 키보드 저수준 훅 스레드 구동
+    #[cfg(windows)]
+    let native_caps_sync = hook::init_native_caps_sync();
     if let Err(error) = hook::start_hook(config, is_pro, is_trial) {
         eprintln!("[Startup] {}", error);
         #[cfg(windows)]
@@ -250,6 +274,7 @@ fn main() {
             diagnostics::start();
         }
         // Do not present the ready UI before the input hook is installed.
+        hook::sync_native_caps_lock();
         indicator::start_indicator();
     }
     println!("[Info] Keysor active and listening to inputs in background.");
@@ -269,7 +294,13 @@ fn main() {
             keysor_macos_pump_events();
             thread::sleep(Duration::from_millis(30));
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(windows)]
+        if native_caps_sync.recv_timeout(Duration::from_millis(100)).is_ok() {
+            // The low-level hook runs before Windows updates keyboard state.
+            thread::sleep(Duration::from_millis(25));
+            hook::sync_native_caps_lock();
+        }
+        #[cfg(all(not(windows), not(target_os = "macos")))]
         thread::sleep(Duration::from_millis(100));
 
         // A. 포커스 전환에 의한 키보드 오작동 엉킴 방지 실시간 동기화 가드

@@ -390,7 +390,7 @@ dependencies = [
 
 [[package]]
 name = "keysor"
-version = "1.0.1"
+version = "1.0.3"
 dependencies = [
  "cc",
  "embed-resource",

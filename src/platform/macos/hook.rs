@@ -62,7 +62,6 @@ const K_CG_EVENT_TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFFFFFE;
 const K_CG_EVENT_TAP_DISABLED_BY_USER_INPUT: u32 = 0xFFFFFFFF;
 
 // CGEventField
-const K_CG_KEYBOARD_EVENT_AUTOREPEAT: u32 = 8;
 const K_CG_KEYBOARD_EVENT_KEYCODE: u32 = 9;
 
 // RunLoop 모드 전역 상수 포인터
@@ -140,10 +139,13 @@ fn macos_keycode_to_vk(keycode: u32) -> u32 {
         53 => 0x1B,  // Escape
         54 => 0x5C,  // Right Cmd
         55 => 0x5B,  // Cmd
-        56 | 60 => 0x10, // Shift
+        56 => 0xA0, // Left Shift
+        60 => 0xA1, // Right Shift
         57 => 0x14,  // CapsLock
-        58 | 61 => 0x12,  // Option / Alt
-        59 | 62 => 0x11,  // Ctrl
+        58 => 0xA4, // Left Option
+        61 => 0xA5, // Right Option
+        59 => 0xA2, // Left Control
+        62 => 0xA3, // Right Control
         123 => 0x25, // Left Arrow
         124 => 0x27, // Right Arrow
         125 => 0x28, // Down Arrow
@@ -236,21 +238,12 @@ extern "C" fn event_tap_callback(
     }
 
     let is_keydown = if etype == K_CG_EVENT_FLAGS_CHANGED {
-        let mask = match keycode {
-            56 | 60 => 0x20000,  // Shift
-            59 | 62 => 0x40000, // Control
-            58 | 61 => 0x80000, // Option
-            55 | 54 => 0x100000, // Command
-            _ => 0,
-        };
-        if mask != 0 { flags & mask != 0 } else { physical_key_down(keycode as u16) }
+        // Aggregate flags remain set when only one of two sided modifiers is released.
+        physical_key_down(keycode as u16)
     } else {
         etype == K_CG_EVENT_KEY_DOWN
     };
-    if is_keydown && unsafe { CGEventGetIntegerValueField(event, K_CG_KEYBOARD_EVENT_AUTOREPEAT) } != 0
-        && !matches!(keycode, 3 | 15 | 49) {
-        return event;
-    }
+    // Repeats must follow the same blocking decision as the initial keydown.
     if dispatch_event(keycode, is_keydown, injected) { std::ptr::null_mut() } else { event }
 }
 

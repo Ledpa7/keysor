@@ -1,6 +1,6 @@
 [package]
 name = "keysor"
-version = "1.0.1"
+version = "1.0.3"
 edition = "2024"
 
 [dependencies]
@@ -13,6 +13,7 @@ serde_json = "1.0"
 windows-sys = { version = "0.52.0", features = [
     "Win32_Foundation",
     "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_TextServices",
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_LibraryLoader",
     "Win32_Graphics_Gdi",
@@ -36,3 +37,7 @@ name = "test_uia"
 path = "scratch/test_uia.rs"
 
 
+
+[[bin]]
+name = "keysor-guardian"
+path = "src/bin/keysor_guardian.rs"
