@@ -1,0 +1,27 @@
+{
+  "native_rasters": 89,
+  "scale_points": 16,
+  "resolution_scale_scenarios": 96,
+  "video_transform_models": 96,
+  "production_sources_unchanged": true,
+  "monitors": [
+    {
+      "device": "\\\\.\\DISPLAY4",
+      "dpi_result": 0,
+      "dpi_x": 120,
+      "dpi_y": 120,
+      "height": 1024,
+      "primary": true,
+      "width": 1280
+    }
+  ],
+  "local_125_normal_visible_bbox": [
+    22,
+    25
+  ],
+  "context_32_bright_visible_bbox": [
+    18,
+    19
+  ],
+  "installed_matches_release": true
+}

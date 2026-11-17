@@ -17,10 +17,10 @@ pub(super) fn draw_key_cap(
     unsafe {
         let bg_color = 0x202424;
         let border_color = match category {
-            1 => 0x3300FF, // Caps Lock: 네온 레드 (BGR: B=00, G=00, R=FF와 보정)
+            1 => 0xADFF2F, // Caps Lock: Keysor mint (#2FFFAD, BGR)
             2 => 0x40E000, // WASD: Grass Green
             3 => 0xFFFF00, // QERF: 네온 파랑 (Cyan)
-            4 => 0x0045FF, // Spacebar: 네온 오렌지 (커서 드래그 색상과 동기화)
+            4 => 0x3300FF, // Spacebar: former Caps Lock neon red (#FF0033, BGR)
             5 => 0x00FFFF, // G Key: 네온 노랑 (Yellow)
             6 => 0xFFFFFF, // Shift: 흰색
             7 => 0xADFF2F, // Windows shortcut discovery: Keysor mint

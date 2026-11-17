@@ -1,0 +1,98 @@
+[
+  {
+    "bounds": [
+      0,
+      0,
+      12,
+      18
+    ],
+    "canvas": 32,
+    "name": "windows-aero-32",
+    "opaque_pixels": 106,
+    "soft_pixels": 45
+  },
+  {
+    "bounds": [
+      0,
+      0,
+      16,
+      25
+    ],
+    "canvas": 40,
+    "name": "windows-aero-40",
+    "opaque_pixels": 162,
+    "soft_pixels": 176
+  },
+  {
+    "bounds": [
+      0,
+      0,
+      19,
+      29
+    ],
+    "canvas": 48,
+    "name": "windows-aero-48",
+    "opaque_pixels": 239,
+    "soft_pixels": 258
+  },
+  {
+    "bounds": [
+      0,
+      0,
+      25,
+      38
+    ],
+    "canvas": 64,
+    "name": "windows-aero-64",
+    "opaque_pixels": 434,
+    "soft_pixels": 58
+  },
+  {
+    "bounds": [
+      1,
+      1,
+      13,
+      19
+    ],
+    "canvas": 32,
+    "name": "configured-arrow-32",
+    "opaque_pixels": 107,
+    "soft_pixels": 62
+  },
+  {
+    "bounds": [
+      1,
+      1,
+      18,
+      25
+    ],
+    "canvas": 40,
+    "name": "configured-arrow-40",
+    "opaque_pixels": 160,
+    "soft_pixels": 209
+  },
+  {
+    "bounds": [
+      1,
+      0,
+      21,
+      29
+    ],
+    "canvas": 48,
+    "name": "configured-arrow-48",
+    "opaque_pixels": 241,
+    "soft_pixels": 57
+  },
+  {
+    "bounds": [
+      2,
+      1,
+      28,
+      39
+    ],
+    "canvas": 64,
+    "name": "configured-arrow-64",
+    "opaque_pixels": 452,
+    "soft_pixels": 69
+  }
+]

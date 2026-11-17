@@ -11,6 +11,32 @@ const DETACHED_PROCESS: u32 = 0x0000_0008;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
+pub(crate) fn guardian_alive(pid: u32) -> bool {
+    use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject};
+    unsafe {
+        let handle = OpenProcess(0x0010_0000, 0, pid);
+        if handle == 0 { return false; }
+        let alive = WaitForSingleObject(handle, 0) == 258; // WAIT_TIMEOUT
+        windows_sys::Win32::Foundation::CloseHandle(handle);
+        alive
+    }
+}
+
+pub(crate) fn monitor_guardian(pid: u32) {
+    use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject};
+    // Wait on the kernel handle, without adding a polling loop.
+    let handle = unsafe { OpenProcess(0x0010_0000, 0, pid) };
+    if handle == 0 {
+        crate::cursor_scheme::restore();
+        return;
+    }
+    thread::spawn(move || unsafe {
+        WaitForSingleObject(handle, 0xffff_ffff);
+        windows_sys::Win32::Foundation::CloseHandle(handle);
+        crate::cursor_scheme::restore();
+    });
+}
+
 fn guardian_binary(main_exe: &Path) -> PathBuf {
     main_exe.with_file_name("keysor-guardian.exe")
 }
@@ -41,7 +67,9 @@ fn start_and_wait(
             if let Ok(contents) = fs::read_to_string(report) {
                 ready = serde_json::from_str::<serde_json::Value>(&contents)
                     .ok()
-                    .and_then(|value| value["ready"].as_bool())
+                    .map(|value| value["ready"] == true
+                        && value["parent_pid"].as_u64() == Some(parent_pid as u64)
+                        && value["guardian_pid"].as_u64() == guardian_pid.map(u64::from))
                     .unwrap_or(false);
                 if ready {
                     break;
@@ -50,6 +78,7 @@ fn start_and_wait(
             thread::sleep(Duration::from_millis(25));
         }
     }
+    ready &= guardian_pid.is_some_and(guardian_alive);
     (guardian_pid, ready, spawn_error)
 }
 
@@ -60,14 +89,21 @@ pub fn spawn() {
     let parent_pid = std::process::id();
     let guardian = guardian_binary(&main_exe);
     let companion_present = guardian.is_file();
-    let program = if companion_present {
-        &guardian
-    } else {
-        &main_exe
-    };
     let report =
         crate::config::get_config_path().with_file_name(format!("watchdog-{}.json", parent_pid));
-    let (guardian_pid, ready, spawn_error) = start_and_wait(program, parent_pid, &report);
+    // Never reuse the main image as its own recovery program: file blocking
+    // and process-name termination would affect both copies alike.
+    let (guardian_pid, ready, spawn_error) = if companion_present {
+        start_and_wait(&guardian, parent_pid, &report)
+    } else {
+        (None, false, Some("Independent keysor-guardian.exe is missing".to_owned()))
+    };
+    if ready {
+        monitor_guardian(guardian_pid.unwrap());
+    } else {
+        let _ = fs::remove_file(&report);
+        restore_cursor();
+    }
 
     let startup_report = report.with_file_name("watchdog-startup.json");
     let _ = fs::write(

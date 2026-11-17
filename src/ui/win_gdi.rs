@@ -1137,13 +1137,20 @@ fn draw_cursor_artwork(hdc_mem: isize, dpi_scale: f64, scale_val: f32, offset: (
 
 /// Render at the final size, with the same vector strokes and anti-aliasing as the overlay.
 pub(crate) fn render_native_cursor_32() -> isize {
+    render_remote_cursor(32)
+}
+
+/// Match the host's physical DPI instead of enlarging a 32px remote bitmap.
+pub(crate) fn render_remote_cursor(size: i32) -> isize {
+    let size = size.clamp(32, 96);
+    let high_size = size * 4;
     unsafe {
         let screen = GetDC(0);
         let dc = CreateCompatibleDC(screen);
         let mut bmi: BITMAPINFO = std::mem::zeroed();
         bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
-        bmi.bmiHeader.biWidth = 128;
-        bmi.bmiHeader.biHeight = -128;
+        bmi.bmiHeader.biWidth = high_size;
+        bmi.bmiHeader.biHeight = -high_size;
         bmi.bmiHeader.biPlanes = 1;
         bmi.bmiHeader.biBitCount = 32;
         bmi.bmiHeader.biCompression = BI_RGB;
@@ -1152,36 +1159,36 @@ pub(crate) fn render_native_cursor_32() -> isize {
         let mut cursor = 0;
         if high != 0 && !bits.is_null() {
             let old = SelectObject(dc, high);
-            std::ptr::write_bytes(bits, 0, 128 * 128 * 4);
+            std::ptr::write_bytes(bits, 0, (high_size * high_size * 4) as usize);
             // Keep all caps inside the canvas and move the hotspot with the artwork.
             let scale = CLICK_SCALE.get().and_then(|s| s.lock().ok().map(|s| *s)).unwrap_or(1.0);
-            draw_cursor_artwork(dc, 4.0, scale, (-2.0, -1.0));
+            draw_cursor_artwork(dc, high_size as f64 / 32.0, scale, (-2.0, -1.0));
             windows_sys::Win32::Graphics::Gdi::GdiFlush();
             SelectObject(dc, old);
-            bmi.bmiHeader.biWidth = 32;
-            bmi.bmiHeader.biHeight = -32;
+            bmi.bmiHeader.biWidth = size;
+            bmi.bmiHeader.biHeight = -size;
             let mut output = std::ptr::null_mut();
             let bitmap = CreateDIBSection(dc, &bmi, DIB_RGB_COLORS, &mut output, 0, 0);
             if bitmap != 0 && !output.is_null() {
-                let source = std::slice::from_raw_parts(bits as *const u32, 128 * 128);
-                let target = std::slice::from_raw_parts_mut(output as *mut u32, 32 * 32);
+                let source = std::slice::from_raw_parts(bits as *const u32, (high_size * high_size) as usize);
+                let target = std::slice::from_raw_parts_mut(output as *mut u32, (size * size) as usize);
                 // Average premultiplied BGRA coverage, including alpha, rather than
                 // stretching an already rasterized cursor with CopyImage.
-                for y in 0..32 {
-                    for x in 0..32 {
+                for y in 0..size as usize {
+                    for x in 0..size as usize {
                         let mut channels = [0u32; 4];
                         for dy in 0..4 { for dx in 0..4 {
-                            let pixel = source[(y * 4 + dy) * 128 + x * 4 + dx];
+                            let pixel = source[(y * 4 + dy) * high_size as usize + x * 4 + dx];
                             for c in 0..4 { channels[c] += (pixel >> (c * 8)) & 255; }
                         }}
-                        target[y * 32 + x] = (0..4).fold(0, |pixel, c| pixel | (((channels[c] + 8) / 16) << (c * 8)));
+                        target[y * size as usize + x] = (0..4).fold(0, |pixel, c| pixel | (((channels[c] + 8) / 16) << (c * 8)));
                     }
                 }
-                let mask_bits = crate::cursor_scheme::transparency_mask(target, 32, 32);
-                let mask = windows_sys::Win32::Graphics::Gdi::CreateBitmap(32, 32, 1, 1, mask_bits.as_ptr() as *const _);
+                let mask_bits = crate::cursor_scheme::transparency_mask(target, size as usize, size as usize);
+                let mask = windows_sys::Win32::Graphics::Gdi::CreateBitmap(size, size, 1, 1, mask_bits.as_ptr() as *const _);
                 if mask != 0 {
                     let info = windows_sys::Win32::UI::WindowsAndMessaging::ICONINFO {
-                        fIcon: 0, xHotspot: 14, yHotspot: 15, hbmMask: mask, hbmColor: bitmap,
+                        fIcon: 0, xHotspot: (14 * size / 32) as u32, yHotspot: (15 * size / 32) as u32, hbmMask: mask, hbmColor: bitmap,
                     };
                     cursor = windows_sys::Win32::UI::WindowsAndMessaging::CreateIconIndirect(&info);
                     DeleteObject(mask);
@@ -1239,7 +1246,16 @@ fn update_indicator_layered_image(hwnd: HWND) {
             // Fill with completely transparent pixels (alpha = 0)
             std::ptr::write_bytes(bits, 0, (width * height * 4) as usize);
 
-            draw_cursor_artwork(hdc_mem, dpi_scale, scale_val, (0.0, 0.0));
+            if crate::platform::windows::chrome_remote_mode() {
+                let role = crate::cursor_scheme::remote_role();
+                if let Some(pixels) = crate::cursor_scheme::remote_context_pixels(role, width as usize) {
+                    std::ptr::copy_nonoverlapping(pixels.as_ptr(), bits as *mut u32, pixels.len());
+                } else {
+                    draw_cursor_artwork(hdc_mem, dpi_scale, scale_val, (-2.0, -1.0));
+                }
+            } else {
+                draw_cursor_artwork(hdc_mem, dpi_scale, scale_val, (0.0, 0.0));
+            }
 
             let pt_src = POINT { x: 0, y: 0 };
             let size_wnd = SIZE { cx: width, cy: height };
@@ -2385,20 +2401,24 @@ fn calculate_interpolated_pos() -> (f64, f64) {
     }
     
     let dpi_scale = get_indicator_dpi_scale();
-    let target_x = pt.x as f64 - 16.0 * dpi_scale;
-    let target_y = pt.y as f64 - 16.0 * dpi_scale;
+    let remote = crate::platform::windows::chrome_remote_mode();
+    let (hot_x,hot_y) = if remote {
+        crate::cursor_scheme::remote_hotspot(crate::cursor_scheme::remote_role())
+    } else { (16.0,16.0) };
+    let target_x = pt.x as f64 - hot_x * dpi_scale;
+    let target_y = pt.y as f64 - hot_y * dpi_scale;
     
     let pos_lock = CUR_INDICATOR_POS.get_or_init(|| Mutex::new(None));
     let mut pos = pos_lock.lock().unwrap();
     
     let (next_x, next_y) = match *pos {
-        Some((cx, cy)) => {
+        Some((cx, cy)) if !remote => {
             let lerp_factor = 0.35;
             let nx = cx + (target_x - cx) * lerp_factor;
             let ny = cy + (target_y - cy) * lerp_factor;
             (nx, ny)
         }
-        None => {
+        _ => {
             (target_x, target_y)
         }
     };
@@ -2482,7 +2502,12 @@ fn update_overlay_window_position(hwnd: HWND, scale_changed_in_loop: bool) {
     };
 
     let state_changed = check_state_changed(is_space_down, is_right_down, is_dragging, is_scrolling, is_snapped);
-    if state_changed || scale_changed_in_loop || dpi_changed {
+    static LAST_REMOTE_ROLE: AtomicU32 = AtomicU32::new(32512);
+    let remote_role_changed = if crate::platform::windows::chrome_remote_mode() {
+        let role = crate::cursor_scheme::remote_role();
+        LAST_REMOTE_ROLE.swap(role,Ordering::Relaxed) != role
+    } else { false };
+    if state_changed || scale_changed_in_loop || dpi_changed || remote_role_changed {
         unsafe { update_indicator_layered_image(hwnd) };
     }
 
@@ -2663,6 +2688,65 @@ pub fn is_snap_flyout_active() -> bool {
             return true;
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod remote_quality_tests {
+    use super::*;
+
+    #[test]
+    fn remote_raster_keeps_physical_size_hotspot_and_smooth_edges() {
+        unsafe {
+            let input=GdiplusStartupInput { GdiplusVersion:1,DebugEventCallback:0,SuppressBackgroundThread:0,SuppressExternalCodecs:0 };
+            let mut token=0;
+            assert_eq!(GdiplusStartup(&mut token,&input,std::ptr::null_mut()),0);
+            for size in [32,40,48,64,96] {
+                let cursor=render_remote_cursor(size);
+                assert_ne!(cursor,0);
+                let mut info: windows_sys::Win32::UI::WindowsAndMessaging::ICONINFO=std::mem::zeroed();
+                let ok=windows_sys::Win32::UI::WindowsAndMessaging::GetIconInfo(cursor,&mut info);
+                windows_sys::Win32::UI::WindowsAndMessaging::DestroyCursor(cursor);
+                assert_ne!(ok,0);
+                let mut dimensions: windows_sys::Win32::Graphics::Gdi::BITMAP=std::mem::zeroed();
+                assert_ne!(windows_sys::Win32::Graphics::Gdi::GetObjectW(info.hbmColor,
+                    std::mem::size_of_val(&dimensions) as i32,&mut dimensions as *mut _ as *mut _),0);
+                let mut bmi: BITMAPINFO=std::mem::zeroed();
+                bmi.bmiHeader.biSize=std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+                bmi.bmiHeader.biWidth=size; bmi.bmiHeader.biHeight=-size;
+                bmi.bmiHeader.biPlanes=1; bmi.bmiHeader.biBitCount=32;
+                let mut pixels=vec![0u32;(size*size) as usize];
+                let dc=GetDC(0);
+                let read=windows_sys::Win32::Graphics::Gdi::GetDIBits(dc,info.hbmColor,0,size as u32,
+                    pixels.as_mut_ptr() as *mut _,&mut bmi,DIB_RGB_COLORS);
+                ReleaseDC(0,dc);
+                DeleteObject(info.hbmColor); DeleteObject(info.hbmMask);
+                assert_eq!(read,size);
+                assert_eq!((dimensions.bmWidth,dimensions.bmHeight),(size,size));
+                assert_eq!((info.xHotspot,info.yHotspot),((14*size/32) as u32,(15*size/32) as u32));
+                assert!(pixels.iter().filter(|&&p|p>>24>128).count()>10);
+                assert!(pixels.iter().filter(|&&p|p>>24>0 && p>>24<255).count()>10);
+                let n=size as usize;
+                for i in 0..n {assert_eq!((pixels[i]|pixels[(n-1)*n+i]|pixels[i*n]|pixels[i*n+n-1])>>24,0);}
+                if let Some(folder)=std::env::var_os("KEYSOR_REMOTE_PREVIEW") {
+                    let bytes:Vec<_>=pixels.iter().flat_map(|p|p.to_le_bytes()).collect();
+                    std::fs::write(std::path::PathBuf::from(folder).join(format!("remote-cursor-{size}.bgra")),bytes).unwrap();
+                }
+            }
+            windows_sys::Win32::Graphics::GdiPlus::GdiplusShutdown(token);
+        }
+    }
+
+    #[test]
+    fn touch_fallback_has_each_context_at_each_remote_dpi() {
+        for size in [32,40,48,64,96] {
+            let ids=[32513,32642,32643,32644,32645,32646,32648,32649];
+            let frames:Vec<_>=ids.iter().map(|&id| crate::cursor_scheme::remote_context_pixels(id,size).unwrap()).collect();
+            for frame in &frames {assert_eq!(frame.len(),size*size);}
+            for i in 0..6 {for previous in &frames[..i] {assert_ne!(&frames[i],previous);}}
+            assert_eq!(frames[5],frames[6]); assert_eq!(frames[6],frames[7]);
+            assert!(crate::cursor_scheme::remote_context_pixels(32512,size).is_none());
+        }
     }
 }
 

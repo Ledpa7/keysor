@@ -2,9 +2,12 @@
 use std::sync::Mutex;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use windows_sys::Win32::Graphics::Gdi::{CreateBitmap, DeleteObject};
+mod context;
+#[cfg(test)]
+mod native_tests;
 
-struct Scheme { artwork: isize, remote_artwork: isize, applied: bool }
-static SCHEME: Mutex<Scheme> = Mutex::new(Scheme { artwork: 0, remote_artwork: 0, applied: false });
+struct Scheme { artwork: isize, remote_artwork: isize, remote_size: i32, applied: bool, contexts: Vec<(u32, isize)>, context_size: i32, system_roles: Vec<(u32, isize)> }
+static SCHEME: Mutex<Scheme> = Mutex::new(Scheme { artwork: 0, remote_artwork: 0, remote_size: 32, applied: false, contexts: Vec::new(), context_size: 0, system_roles: Vec::new() });
 static RESTORES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub fn restore_count() -> u64 { RESTORES.load(std::sync::atomic::Ordering::Relaxed) }
 
@@ -35,7 +38,10 @@ pub fn cache_artwork(bitmap: isize, width: i32, height: i32, bits: *mut std::ffi
         let icon = ICONINFO { fIcon: 0, xHotspot: (width / 2) as u32, yHotspot: (height / 2) as u32, hbmMask: mask, hbmColor: bitmap };
         let artwork = CreateIconIndirect(&icon);
         DeleteObject(mask);
-        let remote_artwork = crate::ui::win_gdi::render_native_cursor_32();
+        // Remote clients apply their own scaling. Keep the historical canvas;
+        // adapting this to the host DPI made the notebook pointer too large.
+        let remote_size = 32;
+        let remote_artwork = crate::ui::win_gdi::render_remote_cursor(remote_size);
         if artwork == 0 || remote_artwork == 0 {
             if artwork != 0 { DestroyCursor(artwork); }
             if remote_artwork != 0 { DestroyCursor(remote_artwork); }
@@ -46,6 +52,7 @@ pub fn cache_artwork(bitmap: isize, width: i32, height: i32, bits: *mut std::ffi
         if state.remote_artwork != 0 { DestroyCursor(state.remote_artwork); }
         state.artwork = artwork;
         state.remote_artwork = remote_artwork;
+        state.remote_size = remote_size;
         // Reapply changed frames even when mouse mode itself has not changed.
         state.applied = false;
         drop(state);
@@ -57,7 +64,10 @@ fn guardian_ready() -> bool {
     let path = crate::config::get_config_path().with_file_name(format!("watchdog-{}.json", std::process::id()));
     std::fs::read_to_string(path).ok()
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .is_some_and(|v| v["parent_pid"].as_u64() == Some(std::process::id() as u64) && v["ready"] == true)
+        .is_some_and(|v| v["parent_pid"].as_u64() == Some(std::process::id() as u64)
+            && v["ready"] == true
+            && v["guardian_pid"].as_u64().and_then(|pid| u32::try_from(pid).ok())
+                .is_some_and(crate::watchdog::guardian_alive))
 }
 
 pub fn set_custom(custom: bool) {
@@ -73,9 +83,26 @@ pub fn set_custom(custom: bool) {
         }
         let artwork = if crate::platform::windows::chrome_remote_mode() { state.remote_artwork } else { state.artwork };
         if artwork == 0 || !guardian_ready() { return; }
+        // Windows selects the appropriate role itself. No hover polling or UIA scan.
+        let size = if crate::platform::windows::chrome_remote_mode() { state.remote_size } else { GetSystemMetrics(SM_CXCURSOR).max(32) };
+        if state.context_size != size {
+            let mut contexts = Vec::new();
+            for id in [32513, 32642, 32643, 32644, 32645, 32646, 32648, 32649] {
+                let cursor = context::render(id, size);
+                if cursor == 0 {
+                    for (_, cursor) in contexts { DestroyCursor(cursor); }
+                    return;
+                }
+                contexts.push((id, cursor));
+            }
+            for (_, cursor) in state.contexts.drain(..) { DestroyCursor(cursor); }
+            state.contexts = contexts;
+            state.context_size = size;
+        }
         for &id in IDS {
             // SetSystemCursor consumes the copy. Keep our owned master intact.
-            let copy = CopyIcon(artwork);
+            let master = state.contexts.iter().find(|(role, _)| *role == id).map(|(_, cursor)| *cursor).unwrap_or(artwork);
+            let copy = CopyIcon(master);
             if copy == 0 || SetSystemCursor(copy, id) == 0 {
                 SystemParametersInfoW(SPI_SETCURSORS, 0, std::ptr::null_mut(), 0);
                 state.applied = false;
@@ -83,9 +110,33 @@ pub fn set_custom(custom: bool) {
             }
         }
         state.applied = true;
+        if crate::platform::windows::chrome_remote_mode() {
+            state.system_roles = IDS.iter().map(|&id| (id, LoadCursorW(0,id as usize as *const u16))).collect();
+        }
         windows_sys::Win32::UI::Input::KeyboardAndMouse::mouse_event(
             windows_sys::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_MOVE, 0, 0, 0, 0);
     }
+}
+
+/// Use the OS-selected role even when it suppresses the native pointer on touch.
+/// Unknown/app-owned cursor handles keep the normal Keysor fallback.
+pub(crate) fn remote_role() -> u32 {
+    if !crate::platform::windows::chrome_remote_mode() { return 32512; }
+    unsafe {
+        let mut info: CURSORINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<CURSORINFO>() as u32;
+        if GetCursorInfo(&mut info) == 0 || info.hCursor == 0 { return 32512; }
+        SCHEME.try_lock().ok().and_then(|s| s.system_roles.iter()
+            .find(|(_, handle)| *handle == info.hCursor).map(|(id,_)| *id)).unwrap_or(32512)
+    }
+}
+
+pub(crate) fn remote_context_pixels(role: u32, size: usize) -> Option<Vec<u32>> {
+    matches!(role,32513 | 32642..=32646 | 32648 | 32649).then(|| context::pixels(role,size))
+}
+
+pub(crate) fn remote_hotspot(role: u32) -> (f64,f64) {
+    if matches!(role,32513 | 32642..=32645) { (16.0,16.0) } else { (14.0,15.0) }
 }
 
 pub fn restore() -> bool {
